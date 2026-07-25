@@ -1,9 +1,8 @@
-use std::any::Any;
-
-use crate::lexer::Tokenizer;
+use crate::{lexer::Tokenizer, parser::Parser};
 
 mod lexer;
-mod util;
+mod parser;
+pub mod util;
 
 // TODO: Fix it
 // fn syscall<>(num: u64, arg1: A1, arg2: A2, arg3: A3) -> String {
@@ -15,13 +14,18 @@ mod util;
 // }
 
 fn main() {
-    let line = "ي <- 5.a;";
+    let line = "let x = {5 + 4}; x = y; y = (1 ** 2); let z = 5;";
 
-    let mut toknizer = Tokenizer::new(line);
-    println!("token: {:#?}", toknizer.next_token());
-    println!("token: {:#?}", toknizer.next_token());
-    println!("token: {:#?}", toknizer.next_token());
-    println!("token: {:#?}", toknizer.next_token());
-    println!("token: {:#?}", toknizer.next_token());
-    println!("token: {:#?}", toknizer.next_token());
+    let mut parser = Parser::new(line);
+    let node = parser.parse();
+
+    println!("Program: {:#?}", node);
+
+    // let mut toknizer = Tokenizer::new(line);
+    // println!("token: {:#?}", toknizer.next_token());
+    // println!("token: {:#?}", toknizer.next_token());
+    // println!("token: {:#?}", toknizer.next_token());
+    // println!("token: {:#?}", toknizer.next_token());
+    // println!("token: {:#?}", toknizer.next_token());
+    // println!("token: {:#?}", toknizer.next_token());
 }

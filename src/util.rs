@@ -45,3 +45,33 @@ impl<'a> Iter<'a> {
         self.get_char(self.current + i)
     }
 }
+#[macro_export]
+macro_rules! iterative_num {
+    (
+        $(#[$meta:meta])*
+        pub enum $name:ident : $underlying:ty {
+            $($variant:ident),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        #[repr($underlying)]
+        #[derive(Copy, Clone)]
+        pub enum $name {
+            $($variant,)*
+        }
+
+        impl std::convert::TryFrom<$underlying> for $name {
+            type Error = ();
+
+            fn try_from(v: $underlying) -> Result<Self, Self::Error> {
+                // Loop through all variants and check against Rust's auto-assigned values
+                $(
+                    if v == $name::$variant as $underlying {
+                        return Ok($name::$variant);
+                    }
+                )*
+                Err(())
+            }
+        }
+    };
+}
