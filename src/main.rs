@@ -1,7 +1,8 @@
-use crate::{lexer::Tokenizer, parser::Parser};
+use crate::{analyzer::Analyzer, parser::Parser};
 
+mod analyzer;
 mod lexer;
-mod parser;
+pub mod parser;
 pub mod util;
 
 // TODO: Fix it
@@ -14,12 +15,21 @@ pub mod util;
 // }
 
 fn main() {
-    let line = "let x = {5 + 4}; x = y; y = (1 ** 2); let z = 5;";
+    let line = "let x = {return 5 + 4;};
+    x = 5;
+    let y = x;
+    {
+        let y = x + 5;
+        y;
+    }
+    const z = {y};
+    ";
 
     let mut parser = Parser::new(line);
     let node = parser.parse();
-
-    println!("Program: {:#?}", node);
+    println!("Node: {:#?}", node);
+    let mut analyzer = Analyzer::new();
+    analyzer.scope_check(&Box::new(node));
 
     // let mut toknizer = Tokenizer::new(line);
     // println!("token: {:#?}", toknizer.next_token());

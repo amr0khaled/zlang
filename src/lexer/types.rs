@@ -57,11 +57,13 @@ pub enum TokenType : u64 {
     Let,
     Const,
     Int,
+    Return,
     // Literal
     Ident,
     IntegerLiteral, // 34
     FloatLiteral,   // 4.3
     BoolLiteral,    // true / false
+    Uninitialized,    // true / false
     // Ends
     EOF,       // End of file // -1
     SemiColon, // ;
