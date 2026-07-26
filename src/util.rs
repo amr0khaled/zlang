@@ -1,3 +1,6 @@
+use std::fs;
+use std::io::Write;
+
 #[derive(Debug)]
 pub struct Iter<'a> {
     src: &'a str,
@@ -74,4 +77,29 @@ macro_rules! iterative_num {
             }
         }
     };
+}
+
+pub fn read_file(filename: &str) -> String {
+    fs::read_to_string(filename).expect("Cannot find this file")
+}
+
+fn write_file(overwrite: bool, filename: &str, content: String) -> Result<(), std::io::Error> {
+    let file = fs::File::options()
+        .create(true)
+        .append(!overwrite)
+        .write(overwrite)
+        .truncate(overwrite)
+        .open(filename);
+    match file {
+        Ok(mut f) => write!(f, "{}", content),
+        Err(e) => Err(e),
+    }
+}
+
+pub fn overwrite_file(filename: &str, content: String) -> Result<(), std::io::Error> {
+    write_file(true, filename, content)
+}
+
+pub fn append_file(filename: &str, content: String) -> Result<(), std::io::Error> {
+    write_file(false, filename, content)
 }
