@@ -104,6 +104,7 @@ impl<'a> Parser<'a> {
             }
             TokenType::Ident => Node::IdentExpr {
                 name: token.pointer,
+                r: None,
                 info,
             },
             TokenType::OpenParenthese => {
@@ -312,6 +313,7 @@ impl<'a> Parser<'a> {
                     TokenType::EOL | TokenType::EOF | TokenType::CloseBracket => Node::ReturnExpr {
                         node: Box::new(Node::IdentExpr {
                             name: ident.pointer,
+                            r: None,
                             info: info.clone(),
                         }),
                         info: info.clone(),
@@ -444,8 +446,8 @@ mod tests {
         let line = "let x = 5;";
         let mut parser = Parser::new(line);
 
-        let integer_info = NodeDetails::new(0, 8);
-        let var_info = NodeDetails::new(0, 0);
+        let integer_info = NodeDetails::new(1, 9);
+        let var_info = NodeDetails::new(1, 1);
         assert_eq!(
             Node::Program {
                 statements: Vec::from([Box::new(Node::VarDeclStmt {
@@ -467,10 +469,10 @@ mod tests {
     fn test_let_block() {
         let line = "let x = {5};";
         let mut parser = Parser::new(line);
-        let var_info = NodeDetails::new(0, 0);
-        let block_info = NodeDetails::new(0, 9);
-        let integer_info = NodeDetails::new(0, 9);
-        let return_info = NodeDetails::new(0, 10);
+        let var_info = NodeDetails::new(1, 1);
+        let block_info = NodeDetails::new(1, 10);
+        let integer_info = NodeDetails::new(1, 10);
+        let return_info = NodeDetails::new(1, 11);
         assert_eq!(
             Node::Program {
                 statements: Vec::from([Box::new(Node::VarDeclStmt {
@@ -499,10 +501,10 @@ mod tests {
     fn test_let_block_with_return() {
         let line = "let x = {return 5;};";
         let mut parser = Parser::new(line);
-        let var_info = NodeDetails::new(0, 0);
-        let block_info = NodeDetails::new(0, 9);
-        let integer_info = NodeDetails::new(0, 16);
-        let return_info = NodeDetails::new(0, 9);
+        let var_info = NodeDetails::new(1, 1);
+        let block_info = NodeDetails::new(1, 10);
+        let integer_info = NodeDetails::new(1, 17);
+        let return_info = NodeDetails::new(1, 10);
         assert_eq!(
             Node::Program {
                 statements: Vec::from([Box::new(Node::VarDeclStmt {

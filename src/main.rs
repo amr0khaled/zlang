@@ -7,6 +7,7 @@ use crate::{
 };
 
 mod analyzer;
+mod cg;
 mod lexer;
 pub mod parser;
 pub mod util;
@@ -35,10 +36,10 @@ fn main() {
     let content = read_file(filename);
 
     let mut parser = Parser::new(&content);
-    let node = parser.parse();
-    let node_struct = format!("Node: {:#?}", node);
+    let node = &mut Box::new(parser.parse());
     let mut analyzer = Analyzer::new();
-    analyzer.scope_check(&Box::new(node));
+    analyzer.scope_check(node);
+    let node_struct = format!("Node: {:#?}", node);
 
     let file_splits = filename.split('.');
     let path = String::from(

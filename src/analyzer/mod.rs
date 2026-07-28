@@ -3,7 +3,10 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     analyzer::{
-        scope::{Scope, ScopeList},
+        scope::{
+            Scope, ScopeList,
+            ScopeRes::{self},
+        },
         symbol::{Symbol, SymbolTable, SymbolType},
     },
     parser::node::Node,
@@ -62,12 +65,12 @@ impl<'a> Analyzer<'a> {
         Self { scopes, tables }
     }
 
-    pub fn scope_check(&mut self, node: &Box<Node<'a>>) -> SymbolType {
-        match &**node {
+    pub fn scope_check(&mut self, node: &mut Box<Node<'a>>) -> SymbolType {
+        match &mut **node {
             Node::Program { statements, .. } => {
                 let mut ty: SymbolType = SymbolType::Void;
                 for stmt in statements {
-                    ty = self.scope_check(&stmt);
+                    ty = self.scope_check(stmt);
                 }
                 ty
             }
@@ -78,7 +81,7 @@ impl<'a> Analyzer<'a> {
                 let local_scope = Box::new(Scope::base(table));
                 self.scopes.push(local_scope);
                 for stmt in statements {
-                    ty = self.scope_check(&stmt);
+                    ty = self.scope_check(stmt);
                 }
                 self.scopes.pop();
                 self.tables.pop();
@@ -89,13 +92,14 @@ impl<'a> Analyzer<'a> {
             } => {
                 let id = gen_ident_id(ident);
                 let ty = self.scope_check(value);
+                let depth = self.scopes.depth;
                 let scope = self.scopes.get();
                 match scope.lookup(&id) {
-                    Some(_) => {
-                        log!(info, "Redeclaration of '{}'", ident)
+                    Some(ScopeRes::Local(_)) => {
+                        panic_log!(info, "Redeclaration of '{}'", ident)
                     }
-                    None => {
-                        let symbol = Symbol::new(ident, ty);
+                    _ => {
+                        let symbol = Symbol::new(ident, ty, depth);
                         scope
                             .get()
                             .borrow_mut()
@@ -112,14 +116,16 @@ impl<'a> Analyzer<'a> {
                 if !ty.is_initialized() {
                     panic!("Cannot declare constant '{}' without initial value", ident)
                 }
-                let scope = self.scopes.get();
+                let scopes = &mut self.scopes;
+                let depth = scopes.depth;
+                let scope = scopes.get();
                 match scope.lookup(&id) {
-                    Some(_) => {
-                        log!(info, "Redeclaration of '{}'", ident);
+                    Some(ScopeRes::Local(_)) => {
+                        panic_log!(info, "Redeclaration of '{}'", ident);
                         // println!(" on line {}", ident, info.line)
                     }
-                    None => {
-                        let symbol = Symbol::new_const(ident, ty);
+                    _ => {
+                        let symbol = Symbol::new_const(ident, ty, depth);
                         scope
                             .get()
                             .borrow_mut()
@@ -128,14 +134,16 @@ impl<'a> Analyzer<'a> {
                 }
                 SymbolType::Void
             }
-            Node::IdentExpr { name, info } => {
+            Node::IdentExpr { name, info, r } => {
+                let depth = self.scopes.depth;
                 let scope = self.scopes.get();
                 let id = gen_ident_id(name);
                 match scope.lookup(&id) {
-                    Some(a) => {
+                    Some(ScopeRes::Local(a)) | Some(ScopeRes::Outer(a)) => {
                         let sym = a.borrow();
                         println!("Found: {:#?}", sym);
-                        sym.ty
+                        *r = Some(Box::new(Node::Ref(id, depth)));
+                        sym.get_type()
                     }
                     None => panic_log!(info, "Undeclared Variable '{}'", name), //panic!(" on line {}", name, info.line),
                 }
@@ -151,18 +159,18 @@ impl<'a> Analyzer<'a> {
                 let scope = self.scopes.get();
                 let or_ty: SymbolType;
                 match scope.lookup(&id) {
-                    Some(a) => {
+                    Some(ScopeRes::Local(a)) | Some(ScopeRes::Outer(a)) => {
                         let v = a.borrow();
-                        if v.is_const {
+                        if v.is_const() {
                             panic!("Cannot reassign a constant '{}' value", ident)
                         }
-                        or_ty = v.ty;
+                        or_ty = v.get_type();
                         println!("Found: {:#?}", a.borrow())
                     }
                     None => panic_log!(info, "Undeclared Variable '{}'", ident), // panic!(" on line {}", ident, info.line),
                 }
                 println!("va: {:?}", value);
-                let ty = self.scope_check(&value);
+                let ty = self.scope_check(value);
                 if ty != or_ty {
                     panic!(
                         "The new value {:?} should have the same type {:?} as the variable",
@@ -173,13 +181,16 @@ impl<'a> Analyzer<'a> {
             }
             Node::ReturnExpr { node, .. } => self.scope_check(node),
 
-            Node::UnaryExpr { node, info, .. } => match self.scope_check(node) {
-                x if x == SymbolType::Integer || x == SymbolType::Float => x,
-                y => panic!(
-                    "This type '{:#?}' is not supported in UnaryExpr\n: Error: {:#?}",
-                    y, info
-                ),
-            },
+            Node::UnaryExpr { node, info, .. } => {
+                let mut node_mut = node;
+                match self.scope_check(&mut node_mut) {
+                    x if x == SymbolType::Integer || x == SymbolType::Float => x,
+                    y => panic!(
+                        "This type '{:#?}' is not supported in UnaryExpr\n: Error: {:#?}",
+                        y, info
+                    ),
+                }
+            }
             Node::BinaryExpr {
                 left, right, info, ..
             } => {

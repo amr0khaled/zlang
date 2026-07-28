@@ -32,8 +32,8 @@ impl<'a> Tokenizer<'a> {
         Self {
             buffer,
             iter: Iter::new(buffer),
-            line: 0,
-            col: 0,
+            line: 1,
+            col: 1,
         }
     }
     fn skip_whitespace(&mut self) {
@@ -107,6 +107,7 @@ impl<'a> Tokenizer<'a> {
             '\n' => {
                 self.advance_by(1);
                 self.line += 1;
+                self.col = 1;
                 Some(self.tokenize(TokenType::EOL, 1))
             }
             ';' => {
@@ -339,27 +340,27 @@ mod tests {
         let line = "int x = 5;";
         let mut tokenizer = Tokenizer::new(line);
         assert_eq!(
-            Token::new(TokenType::Int, "int", 0, 0),
+            Token::new(TokenType::Int, "int", 1, 1),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::Ident, "x", 0, 4),
+            Token::new(TokenType::Ident, "x", 1, 5),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::Assign, "=", 0, 6),
+            Token::new(TokenType::Assign, "=", 1, 7),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::IntegerLiteral, "5", 0, 8),
+            Token::new(TokenType::IntegerLiteral, "5", 1, 9),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::SemiColon, ";", 0, 9),
+            Token::new(TokenType::SemiColon, ";", 1, 10),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::EOF, "", 0, 10),
+            Token::new(TokenType::EOF, "", 1, 11),
             tokenizer.next_token()
         );
     }
@@ -369,27 +370,27 @@ mod tests {
         let line = "let x = 5.0";
         let mut tokenizer = Tokenizer::new(line);
         assert_eq!(
-            Token::new(TokenType::Let, "let", 0, 0),
+            Token::new(TokenType::Let, "let", 1, 1),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::Ident, "x", 0, 4),
+            Token::new(TokenType::Ident, "x", 1, 5),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::Assign, "=", 0, 6),
+            Token::new(TokenType::Assign, "=", 1, 7),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::FloatLiteral, "5.0", 0, 8),
+            Token::new(TokenType::FloatLiteral, "5.0", 1, 9),
             tokenizer.next_token()
         );
         assert_ne!(
-            Token::new(TokenType::SemiColon, ";", 0, 11),
+            Token::new(TokenType::SemiColon, ";", 1, 12),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::EOF, "", 0, 11),
+            Token::new(TokenType::EOF, "", 1, 12),
             tokenizer.next_token()
         );
     }
@@ -399,39 +400,39 @@ mod tests {
         let line = "print(1, 2, 3)";
         let mut tokenizer = Tokenizer::new(line);
         assert_eq!(
-            Token::new(TokenType::Ident, "print", 0, 0),
+            Token::new(TokenType::Ident, "print", 1, 1),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::OpenParenthese, "(", 0, 5),
+            Token::new(TokenType::OpenParenthese, "(", 1, 6),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::IntegerLiteral, "1", 0, 6),
+            Token::new(TokenType::IntegerLiteral, "1", 1, 7),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::Comma, ",", 0, 7),
+            Token::new(TokenType::Comma, ",", 1, 8),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::IntegerLiteral, "2", 0, 9),
+            Token::new(TokenType::IntegerLiteral, "2", 1, 10),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::Comma, ",", 0, 10),
+            Token::new(TokenType::Comma, ",", 1, 11),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::IntegerLiteral, "3", 0, 12),
+            Token::new(TokenType::IntegerLiteral, "3", 1, 13),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::CloseParenthese, ")", 0, 13),
+            Token::new(TokenType::CloseParenthese, ")", 1, 14),
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::EOF, "", 0, 14),
+            Token::new(TokenType::EOF, "", 1, 15),
             tokenizer.next_token()
         );
     }

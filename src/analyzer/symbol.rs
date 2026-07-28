@@ -31,27 +31,36 @@ pub type SymbolTable<'a> = HashMap<u32, Rc<RefCell<Symbol<'a>>>>;
 pub struct Symbol<'a> {
     id: u32,
     name: &'a str,
-    pub is_const: bool,
-    pub ty: SymbolType,
+    is_const: bool,
+    ty: SymbolType,
+    depth: usize,
 }
 
 impl<'a> Symbol<'a> {
-    pub fn new(name: &'a str, ty: SymbolType) -> Self {
+    pub fn new(name: &'a str, ty: SymbolType, depth: usize) -> Self {
         let id = gen_ident_id(name);
         Self {
             id,
             name,
             is_const: false,
             ty,
+            depth,
         }
     }
-    pub fn new_const(name: &'a str, ty: SymbolType) -> Self {
+    pub fn new_const(name: &'a str, ty: SymbolType, depth: usize) -> Self {
         let id = gen_ident_id(name);
         Self {
             id,
             name,
             is_const: true,
             ty,
+            depth,
         }
+    }
+    pub fn get_type(&self) -> SymbolType {
+        self.ty
+    }
+    pub fn is_const(&self) -> bool {
+        self.is_const
     }
 }

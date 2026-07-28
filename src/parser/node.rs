@@ -21,6 +21,8 @@ impl NodeDetails {
 #[derive(Debug, PartialEq)]
 #[allow(dead_code)]
 pub enum Node<'a> {
+    // ===References===
+    Ref(u32, usize),
     // ===Literal===
     IntegerLit {
         v: usize,
@@ -38,6 +40,7 @@ pub enum Node<'a> {
     // ===Expressions===
     IdentExpr {
         name: &'a str,
+        r: Option<Box<Node<'a>>>,
         info: NodeDetails,
     },
     UnaryExpr {
