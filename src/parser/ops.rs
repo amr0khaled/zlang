@@ -29,12 +29,14 @@ pub enum Operator: u64 {
     EndBinary,
     // Comparisons
     Equality,           // ==
+    NotEquality,       // !=
     GreaterThan,        // >
     LesserThan,         // <
     GreaterThanOrEqual, // >=
     LesserThanOrEqual,  // <=
     EndComparison,
     // Assigning Operators
+    Assign,             // =
     AssignNew,       // <-
     AssignPlus,      // +=
     AssignMinus,     // -=
@@ -42,7 +44,6 @@ pub enum Operator: u64 {
     AssignPower,     // **=
     AssignAnd,       // &&=
     AssignOr,        // ||=
-    AssignNot,       // !=
     AssignDivide,    // /=
     AssignModolus,   // %=
     AssignBinaryAnd, // &=

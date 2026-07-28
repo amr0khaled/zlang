@@ -63,4 +63,10 @@ impl<'a> Symbol<'a> {
     pub fn is_const(&self) -> bool {
         self.is_const
     }
+    pub fn get_id(&self) -> u32 {
+        self.id
+    }
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
 }

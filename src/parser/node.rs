@@ -1,4 +1,5 @@
 use crate::{
+    analyzer::symbol::SymbolType,
     lexer::{Token, types::TokenType},
     parser::ops::Operator,
 };
@@ -41,12 +42,14 @@ pub enum Node<'a> {
     IdentExpr {
         name: &'a str,
         r: Option<Box<Node<'a>>>,
+        ty: Option<SymbolType>,
         info: NodeDetails,
     },
     UnaryExpr {
         op: Operator,
         node: Box<Node<'a>>,
         kind: &'a str,
+        ty: Option<SymbolType>,
         info: NodeDetails,
     }, // --IDENT
     BinaryExpr {
@@ -54,6 +57,7 @@ pub enum Node<'a> {
         left: Box<Node<'a>>,
         right: Box<Node<'a>>,
         kind: &'a str,
+        ty: Option<SymbolType>,
         info: NodeDetails,
     }, // x + y | 5 < 2
     CallExpr {
@@ -61,6 +65,7 @@ pub enum Node<'a> {
         args: Vec<Box<Node<'a>>>,
         kind: &'a str,
         info: NodeDetails,
+        r: Option<Box<Node<'a>>>,
     },
     // ===Statements===
     VarDeclStmt {
@@ -68,18 +73,21 @@ pub enum Node<'a> {
         value: Box<Node<'a>>,
         kind: &'a str,
         info: NodeDetails,
+        r: Option<Box<Node<'a>>>,
     },
     AssignStmt {
         ident: &'a str,
+        op: Operator,
         value: Box<Node<'a>>,
-        kind: TokenType,
         info: NodeDetails,
+        r: Option<Box<Node<'a>>>,
     },
     ConstDeclStmt {
         ident: &'a str,
         value: Box<Node<'a>>,
         kind: &'a str,
         info: NodeDetails,
+        r: Option<Box<Node<'a>>>,
     },
     ExprStmt {
         node: Box<Node<'a>>,
@@ -93,6 +101,8 @@ pub enum Node<'a> {
         statements: Vec<Box<Node<'a>>>,
         kind: &'a str,
         info: NodeDetails,
+        depth: Option<usize>,
+        is_body: bool,
     },
     Program {
         statements: Vec<Box<Node<'a>>>,

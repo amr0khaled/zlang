@@ -23,6 +23,7 @@ pub enum TokenType : u64 {
     // not is the same as logic not
     // Comapres
     Equality,           // ==
+    NotEquality,           // !=
     GreaterThan,        // >
     LesserThan,         // <
     GreaterThanOrEqual, // >=
@@ -36,7 +37,6 @@ pub enum TokenType : u64 {
     AssignPower,     // **=
     AssignAnd,       // &&=
     AssignOr,        // ||=
-    AssignNot,       // !=
     AssignDivide,    // /=
     AssignModolus,   // %=
     AssignBinaryAnd, // &=

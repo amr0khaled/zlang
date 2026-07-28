@@ -251,7 +251,7 @@ impl<'a> Tokenizer<'a> {
                 let peeked = self.peek();
                 if peeked == '=' {
                     self.advance_by(2);
-                    Some(self.tokenize(TokenType::AssignNot, 2))
+                    Some(self.tokenize(TokenType::NotEquality, 2))
                 } else {
                     self.advance_by(1);
                     Some(self.tokenize(TokenType::Not, 1))

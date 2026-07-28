@@ -105,6 +105,7 @@ impl<'a> Parser<'a> {
             TokenType::Ident => Node::IdentExpr {
                 name: token.pointer,
                 r: None,
+                ty: None,
                 info,
             },
             TokenType::OpenParenthese => {
@@ -112,6 +113,13 @@ impl<'a> Parser<'a> {
                 expect!(self, TokenType::CloseParenthese);
                 inner
             }
+            TokenType::Not => Node::UnaryExpr {
+                op: Operator::Not,
+                node: Box::new(self.parse_expr()),
+                kind: "Inverse Logic",
+                ty: None,
+                info,
+            },
             TokenType::Increment => {
                 if self.peek().kind == TokenType::Ident {
                     self.next();
@@ -120,6 +128,7 @@ impl<'a> Parser<'a> {
                         op,
                         node: Box::new(self.parse_primary()),
                         kind: get_hint(op),
+                        ty: None,
                         info,
                     }
                 } else {
@@ -128,6 +137,7 @@ impl<'a> Parser<'a> {
                         op,
                         node: Box::new(self.parse_primary()),
                         kind: get_hint(op),
+                        ty: None,
                         info,
                     }
                 }
@@ -140,6 +150,7 @@ impl<'a> Parser<'a> {
                         op,
                         node: Box::new(self.parse_primary()),
                         kind: get_hint(op),
+                        ty: None,
                         info,
                     }
                 } else {
@@ -148,6 +159,7 @@ impl<'a> Parser<'a> {
                         op,
                         node: Box::new(self.parse_primary()),
                         kind: get_hint(op),
+                        ty: None,
                         info,
                     }
                 }
@@ -179,6 +191,7 @@ impl<'a> Parser<'a> {
                 left: Box::new(left),
                 right: Box::new(right),
                 kind: get_hint(op),
+                ty: None,
                 info: Node::info(&self.peek()),
             };
         }
@@ -227,9 +240,8 @@ impl<'a> Parser<'a> {
                 "dynamic ident: '{}' {:?} line {}",
                 peek_pointer, peek_kind, peek_line
             );
-            let ty = TokenType::Uninitialized;
             let value = Box::new(Node::Dynamic);
-            (ty, value)
+            (Operator::AssignNew, value)
         };
         let (_ty, value) = match peek_kind {
             x if is_assign_operator(x) => self.parse_assign_core(),
@@ -251,6 +263,7 @@ impl<'a> Parser<'a> {
                 value,
                 kind: "ConstDecl",
                 info,
+                r: None,
             }
         } else {
             Node::VarDeclStmt {
@@ -258,26 +271,44 @@ impl<'a> Parser<'a> {
                 value,
                 kind: "VarDecl",
                 info,
+                r: None,
             }
         }
     }
-    fn parse_assign_core(&mut self) -> (TokenType, Box<Node<'a>>) {
+    fn parse_assign_core(&mut self) -> (Operator, Box<Node<'a>>) {
         println!("var ");
         println!("core: before expr");
-        let ty = expect!(self, is_assign_operator).kind;
+        let op = match expect!(self, is_assign_operator).kind {
+            TokenType::Assign => Operator::Assign,
+            TokenType::AssignNew => Operator::AssignNew,
+            TokenType::AssignPlus => Operator::AssignPlus,
+            TokenType::AssignMinus => Operator::AssignMinus,
+            TokenType::AssignMultiply => Operator::AssignMultiply,
+            TokenType::AssignPower => Operator::AssignPower,
+            TokenType::AssignAnd => Operator::AssignAnd,
+            TokenType::AssignOr => Operator::AssignOr,
+            TokenType::AssignDivide => Operator::AssignDivide,
+            TokenType::AssignModolus => Operator::AssignModolus,
+            TokenType::AssignBinaryAnd => Operator::AssignBinaryAnd,
+            TokenType::AssignBinaryOr => Operator::AssignBinaryOr,
+            TokenType::AssignBinaryXor => Operator::AssignBinaryXor,
+            _ => panic!("Assign operator unknown"),
+        };
+
         let value = Box::new(self.parse_expr());
         println!("V: {:?}", value);
-        (ty, value)
+        (op, value)
     }
     fn parse_assign(&mut self, ident: &Token<'a>) -> Node<'a> {
         println!("assign core ");
         let info = Node::info(&self.peek());
-        let (ty, value) = self.parse_assign_core();
+        let (op, value) = self.parse_assign_core();
         Node::AssignStmt {
+            op,
             ident: ident.pointer,
             value,
-            kind: ty,
             info,
+            r: None,
         }
     }
     fn parse_block(&mut self) -> Node<'a> {
@@ -294,9 +325,11 @@ impl<'a> Parser<'a> {
 
         self.expect_one_of(&[TokenType::SemiColon, TokenType::EOL]);
         Node::Block {
+            is_body: false,
             statements: stmts,
             kind: "LocalScope",
             info,
+            depth: None,
         }
     }
     fn parse_statement(&mut self) -> Node<'a> {
@@ -314,6 +347,7 @@ impl<'a> Parser<'a> {
                         node: Box::new(Node::IdentExpr {
                             name: ident.pointer,
                             r: None,
+                            ty: None,
                             info: info.clone(),
                         }),
                         info: info.clone(),
@@ -390,7 +424,6 @@ fn is_assign_operator(ty: TokenType) -> bool {
         TokenType::AssignPower => true,
         TokenType::AssignAnd => true,
         TokenType::AssignOr => true,
-        TokenType::AssignNot => true,
         TokenType::AssignDivide => true,
         TokenType::AssignModolus => true,
         TokenType::AssignBinaryAnd => true,
@@ -415,6 +448,7 @@ fn is_operator(ty: TokenType) -> bool {
         TokenType::BinaryOr => true,
         TokenType::BinaryXor => true,
         TokenType::Equality => true,
+        TokenType::NotEquality => true,
         TokenType::GreaterThan => true,
         TokenType::LesserThan => true,
         TokenType::GreaterThanOrEqual => true,
@@ -451,6 +485,7 @@ mod tests {
         assert_eq!(
             Node::Program {
                 statements: Vec::from([Box::new(Node::VarDeclStmt {
+                    r: None,
                     ident: "x",
                     value: Box::new(Node::IntegerLit {
                         v: 5,
@@ -476,8 +511,11 @@ mod tests {
         assert_eq!(
             Node::Program {
                 statements: Vec::from([Box::new(Node::VarDeclStmt {
+                    r: None,
                     ident: "x",
                     value: Box::new(Node::Block {
+                        is_body: false,
+                        depth: None,
                         statements: Vec::from([Box::new(Node::ReturnExpr {
                             node: Box::new(Node::IntegerLit {
                                 v: 5,
@@ -509,7 +547,10 @@ mod tests {
             Node::Program {
                 statements: Vec::from([Box::new(Node::VarDeclStmt {
                     ident: "x",
+                    r: None,
                     value: Box::new(Node::Block {
+                        is_body: false,
+                        depth: None,
                         statements: Vec::from([Box::new(Node::ReturnExpr {
                             node: Box::new(Node::IntegerLit {
                                 v: 5,

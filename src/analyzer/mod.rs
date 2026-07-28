@@ -9,10 +9,10 @@ use crate::{
         },
         symbol::{Symbol, SymbolTable, SymbolType},
     },
-    parser::node::Node,
+    parser::{node::Node, ops::Operator},
 };
 mod scope;
-mod symbol;
+pub mod symbol;
 
 #[macro_export]
 macro_rules! log {
@@ -52,7 +52,7 @@ pub fn gen_ident_id(ident: &str) -> u32 {
 
 pub struct Analyzer<'a> {
     scopes: ScopeList<'a>,
-    tables: Vec<Rc<RefCell<SymbolTable<'a>>>>,
+    pub tables: Vec<Rc<RefCell<SymbolTable<'a>>>>,
 }
 impl<'a> Analyzer<'a> {
     pub fn new() -> Self {
@@ -74,10 +74,13 @@ impl<'a> Analyzer<'a> {
                 }
                 ty
             }
-            Node::Block { statements, .. } => {
+            Node::Block {
+                statements, depth, ..
+            } => {
                 let mut ty: SymbolType = SymbolType::Void;
                 let table: Rc<RefCell<SymbolTable<'a>>> = Rc::new(RefCell::new(HashMap::new()));
                 self.tables.push(table.clone());
+                *depth = Some(self.tables.len() - 1);
                 let local_scope = Box::new(Scope::base(table));
                 self.scopes.push(local_scope);
                 for stmt in statements {
@@ -88,11 +91,15 @@ impl<'a> Analyzer<'a> {
                 ty
             }
             Node::VarDeclStmt {
-                ident, info, value, ..
+                ident,
+                info,
+                value,
+                r,
+                ..
             } => {
                 let id = gen_ident_id(ident);
                 let ty = self.scope_check(value);
-                let depth = self.scopes.depth;
+                let depth = self.tables.len() - 1;
                 let scope = self.scopes.get();
                 match scope.lookup(&id) {
                     Some(ScopeRes::Local(_)) => {
@@ -104,12 +111,17 @@ impl<'a> Analyzer<'a> {
                             .get()
                             .borrow_mut()
                             .insert(id, Rc::new(RefCell::new(symbol)));
+                        *r = Some(Box::new(Node::Ref(id, depth)))
                     }
                 }
                 SymbolType::Void
             }
             Node::ConstDeclStmt {
-                ident, info, value, ..
+                ident,
+                info,
+                value,
+                r,
+                ..
             } => {
                 let id = gen_ident_id(ident);
                 let ty = self.scope_check(value);
@@ -117,7 +129,7 @@ impl<'a> Analyzer<'a> {
                     panic!("Cannot declare constant '{}' without initial value", ident)
                 }
                 let scopes = &mut self.scopes;
-                let depth = scopes.depth;
+                let depth = self.tables.len() - 1;
                 let scope = scopes.get();
                 match scope.lookup(&id) {
                     Some(ScopeRes::Local(_)) => {
@@ -130,20 +142,22 @@ impl<'a> Analyzer<'a> {
                             .get()
                             .borrow_mut()
                             .insert(id, Rc::new(RefCell::new(symbol)));
+                        *r = Some(Box::new(Node::Ref(id, depth)))
                     }
                 }
                 SymbolType::Void
             }
-            Node::IdentExpr { name, info, r } => {
-                let depth = self.scopes.depth;
+            Node::IdentExpr { name, info, r, ty } => {
                 let scope = self.scopes.get();
                 let id = gen_ident_id(name);
                 match scope.lookup(&id) {
                     Some(ScopeRes::Local(a)) | Some(ScopeRes::Outer(a)) => {
                         let sym = a.borrow();
                         println!("Found: {:#?}", sym);
-                        *r = Some(Box::new(Node::Ref(id, depth)));
-                        sym.get_type()
+                        *r = Some(Box::new(Node::Ref(id, sym.depth().clone())));
+                        let _ty = sym.get_type();
+                        *ty = Some(_ty.clone());
+                        _ty
                     }
                     None => panic_log!(info, "Undeclared Variable '{}'", name), //panic!(" on line {}", name, info.line),
                 }
@@ -153,38 +167,83 @@ impl<'a> Analyzer<'a> {
             Node::BooleanLit { .. } => SymbolType::Boolean,
             Node::Dynamic => SymbolType::Uninitialized,
             Node::AssignStmt {
-                ident, value, info, ..
+                ident,
+                value,
+                info,
+                r,
+                op,
+                ..
             } => {
                 let id = gen_ident_id(ident);
-                let scope = self.scopes.get();
-                let or_ty: SymbolType;
-                match scope.lookup(&id) {
-                    Some(ScopeRes::Local(a)) | Some(ScopeRes::Outer(a)) => {
-                        let v = a.borrow();
-                        if v.is_const() {
-                            panic!("Cannot reassign a constant '{}' value", ident)
+                let current_depth = self.tables.len() - 1;
+
+                let lookup_res = {
+                    let scope = self.scopes.get();
+                    match scope.lookup(&id) {
+                        Some(ScopeRes::Local(a)) => {
+                            let v = a.borrow();
+                            Some((true, v.is_const(), v.depth().clone(), v.get_type()))
                         }
-                        or_ty = v.get_type();
-                        println!("Found: {:#?}", a.borrow())
+                        Some(ScopeRes::Outer(a)) => {
+                            let v = a.borrow();
+                            Some((false, v.is_const(), v.depth().clone(), v.get_type()))
+                        }
+                        None => None,
                     }
-                    None => panic_log!(info, "Undeclared Variable '{}'", ident), // panic!(" on line {}", ident, info.line),
+                };
+
+                match lookup_res {
+                    Some((local, is_const, decl_depth, expected_ty)) => {
+                        if op == &Operator::AssignNew && local {
+                            panic!("Cannot declare an existing variable '{}'", ident);
+                        }
+                        if is_const {
+                            panic!("Cannot reassign a constant '{}' value", ident);
+                        }
+
+                        let rhs_ty = self.scope_check(value);
+                        if rhs_ty != expected_ty {
+                            panic!(
+                                "The new value {:?} should have the same type {:?} as the variable",
+                                rhs_ty, expected_ty
+                            );
+                        }
+
+                        *r = Some(Box::new(Node::Ref(id, decl_depth)));
+                    }
+                    None => {
+                        if op == &Operator::AssignNew {
+                            let new_ty = self.scope_check(value);
+
+                            // Insert into symbol table
+                            let symbol = Symbol::new(ident, new_ty, current_depth);
+                            self.scopes
+                                .get()
+                                .get()
+                                .borrow_mut()
+                                .insert(id, Rc::new(RefCell::new(symbol)));
+
+                            *r = Some(Box::new(Node::Ref(id, current_depth)));
+                        } else {
+                            panic_log!(info, "Undeclared Variable '{}'", ident);
+                        }
+                    }
                 }
-                println!("va: {:?}", value);
-                let ty = self.scope_check(value);
-                if ty != or_ty {
-                    panic!(
-                        "The new value {:?} should have the same type {:?} as the variable",
-                        ty, or_ty
-                    )
-                }
+
                 SymbolType::Void
             }
             Node::ReturnExpr { node, .. } => self.scope_check(node),
 
-            Node::UnaryExpr { node, info, .. } => {
+            Node::UnaryExpr { node, info, ty, .. } => {
                 let mut node_mut = node;
                 match self.scope_check(&mut node_mut) {
-                    x if x == SymbolType::Integer || x == SymbolType::Float => x,
+                    x if x == SymbolType::Integer
+                        || x == SymbolType::Float
+                        || x == SymbolType::Boolean =>
+                    {
+                        *ty = Some(x);
+                        x
+                    }
                     y => panic!(
                         "This type '{:#?}' is not supported in UnaryExpr\n: Error: {:#?}",
                         y, info
@@ -192,10 +251,17 @@ impl<'a> Analyzer<'a> {
                 }
             }
             Node::BinaryExpr {
-                left, right, info, ..
+                left,
+                right,
+                info,
+                ty,
+                ..
             } => {
                 let left_ty = match self.scope_check(left) {
-                    x if x == SymbolType::Integer || x == SymbolType::Float => x,
+                    x if x == SymbolType::Integer || x == SymbolType::Float => {
+                        *ty = Some(x);
+                        x
+                    }
                     y => panic!(
                         "This type '{:#?}' is not supported in BinaryExpr\n: Error: {:#?}",
                         y, info

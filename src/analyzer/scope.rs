@@ -1,16 +1,10 @@
-use std::{
-    cell::{Ref, RefCell},
-    mem,
-    rc::Rc,
-    thread::scope,
-};
+use std::{cell::RefCell, mem, rc::Rc};
 
 use crate::analyzer::symbol::{Symbol, SymbolTable};
 #[derive(Debug)]
 pub struct Scope<'a> {
     node: Rc<RefCell<SymbolTable<'a>>>,
     parent: Option<Box<Scope<'a>>>,
-    local: bool,
 }
 
 pub enum ScopeRes<'a> {
@@ -20,17 +14,12 @@ pub enum ScopeRes<'a> {
 
 impl<'a> Scope<'a> {
     pub fn base(node: Rc<RefCell<SymbolTable<'a>>>) -> Self {
-        Self {
-            node,
-            parent: None,
-            local: true,
-        }
+        Self { node, parent: None }
     }
     pub fn new(node: Rc<RefCell<SymbolTable<'a>>>, parent: Box<Scope<'a>>) -> Self {
         Self {
             node,
             parent: Some(parent),
-            local: true,
         }
     }
     pub fn set_parent(&mut self, parent: Box<Scope<'a>>) {
@@ -56,9 +45,6 @@ impl<'a> Scope<'a> {
             },
             None => None,
         }
-    }
-    pub fn is_local(&self) -> bool {
-        self.local
     }
 }
 

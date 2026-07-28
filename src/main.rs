@@ -2,11 +2,12 @@ use std::env;
 
 use crate::{
     analyzer::Analyzer,
+    cg::Memory,
     parser::Parser,
     util::{overwrite_file, read_file},
 };
 
-mod analyzer;
+pub mod analyzer;
 mod cg;
 mod lexer;
 pub mod parser;
@@ -39,6 +40,9 @@ fn main() {
     let node = &mut Box::new(parser.parse());
     let mut analyzer = Analyzer::new();
     analyzer.scope_check(node);
+    let mut cg = Memory::new(analyzer.tables);
+    cg.emit(node);
+    let ins = cg.get_instructions();
     let node_struct = format!("Node: {:#?}", node);
 
     let file_splits = filename.split('.');
@@ -51,8 +55,15 @@ fn main() {
     );
     let mut name = String::from(".");
     name.push_str(&path);
-    name.push_str(".z.node");
-    match overwrite_file(&name, node_struct) {
+    let mut node_file = name.clone();
+    node_file.push_str(".z.node");
+    let mut opcode_file = name.clone();
+    opcode_file.push_str(".z.opcodes");
+    match overwrite_file(&node_file, node_struct) {
+        Ok(()) => {}
+        Err(e) => panic!("FS Error: {:?}", e),
+    }
+    match overwrite_file(&opcode_file, format!("{:#?}", ins)) {
         Ok(()) => {}
         Err(e) => panic!("FS Error: {:?}", e),
     }
