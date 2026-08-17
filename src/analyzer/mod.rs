@@ -111,7 +111,7 @@ impl<'a> Analyzer<'a> {
                             .get()
                             .borrow_mut()
                             .insert(id, Rc::new(RefCell::new(symbol)));
-                        *r = Some(Box::new(Node::Ref(id, depth)))
+                        *r = Some(Box::new(Node::Ref(id, depth)));
                     }
                 }
                 SymbolType::Void

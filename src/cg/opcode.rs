@@ -20,7 +20,7 @@ impl Sym {
         }
     }
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum OpCode {
     // ===Literal===
     // ==Unsigned Integer==
@@ -62,9 +62,9 @@ pub enum OpCode {
     Or,  // ||
     Not, // !
     // ==Binary==
-    BiAnd, // &
-    BiOr,  // |
-    BiXor, // ^
+    BitAnd, // &
+    BitOr,  // |
+    BitXor, // ^
     // ==Comparisons==
     Equality,           // ==
     NotEquality,        // !=
@@ -105,9 +105,9 @@ impl OpCode {
             (Operator::And, _) => And,
             (Operator::Or, _) => Or,
             (Operator::Not, _) => Not,
-            (Operator::BinaryAnd, _) => BiAnd,
-            (Operator::BinaryOr, _) => BiOr,
-            (Operator::BinaryXor, _) => BiXor,
+            (Operator::BinaryAnd, _) => BitAnd,
+            (Operator::BinaryOr, _) => BitOr,
+            (Operator::BinaryXor, _) => BitXor,
             (Operator::Equality, _) => Equality,
             (Operator::NotEquality, _) => NotEquality,
             (Operator::GreaterThan, _) => GreaterThan,
@@ -133,9 +133,9 @@ impl OpCode {
             (Operator::AssignAnd, _) => And,
             (Operator::AssignOr, _) => Or,
             (Operator::AssignModolus, _) => Mod,
-            (Operator::AssignBinaryAnd, _) => BiAnd,
-            (Operator::AssignBinaryOr, _) => BiOr,
-            (Operator::AssignBinaryXor, _) => BiXor,
+            (Operator::AssignBinaryAnd, _) => BitAnd,
+            (Operator::AssignBinaryOr, _) => BitOr,
+            (Operator::AssignBinaryXor, _) => BitXor,
             _ => panic!("Not supported"),
         }
     }

@@ -8,31 +8,36 @@ use crate::{
     },
     parser::{node::Node, ops::Operator},
 };
+mod asm;
+mod cpu;
 mod opcode;
 
 pub struct Memory<'a> {
-    ins: Vec<OpCode>,
+    opcodes: Vec<OpCode>,
     tables: Vec<Rc<RefCell<SymbolTable<'a>>>>,
 }
 
 impl<'a> Memory<'a> {
     pub fn new(tables: Vec<Rc<RefCell<SymbolTable<'a>>>>) -> Self {
         Self {
-            ins: vec![],
+            opcodes: vec![],
             tables,
         }
     }
+    pub fn get_opcodes(&self) -> &Vec<OpCode> {
+        &self.opcodes
+    }
     fn push(&mut self, op: OpCode) {
-        self.ins.push(op);
+        self.opcodes.push(op);
     }
     fn pop(&mut self) -> Option<OpCode> {
-        self.ins.pop()
+        self.opcodes.pop()
     }
     fn peek(&mut self) -> &OpCode {
-        &self.ins[self.ins.len() - 1]
+        &self.opcodes[self.opcodes.len() - 1]
     }
     fn peekn(&mut self, n: usize) -> &OpCode {
-        &self.ins[self.ins.len() - 1 - n]
+        &self.opcodes[self.opcodes.len() - 1 - n]
     }
     pub fn emit(&mut self, node: &Node) {
         match node {
@@ -97,6 +102,7 @@ impl<'a> Memory<'a> {
             Node::CallExpr { .. } => todo!("Call expr"),
             Node::VarDeclStmt { value, r, .. } => {
                 self.emit(value);
+                println!("{:#?}", r);
                 if let Some(a) = r {
                     self.store(Sym::from(a));
                 }
@@ -149,7 +155,7 @@ impl<'a> Memory<'a> {
         self.tables[depth].borrow_mut().get(&id).cloned()
     }
     pub fn get_instructions(&self) -> &Vec<OpCode> {
-        &self.ins
+        &self.opcodes
     }
 }
 
@@ -243,5 +249,219 @@ impl<'a> Literal for Memory<'a> {
 
     fn push_bool(&mut self, v: bool) {
         self.push(PushBool(v));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        analyzer::{Analyzer, gen_ident_id},
+        cg::{Memory, OpCode, opcode::Sym},
+        parser::{Parser, node::Node},
+    };
+
+    fn exec_memory(code: &'static str) -> (Box<Node<'static>>, Memory<'static>) {
+        let mut parser: Parser<'static> = Parser::new(code);
+        let mut node = Box::new(parser.parse());
+        let mut analyzer = Analyzer::new();
+        analyzer.scope_check(&mut node);
+        (node, Memory::new(analyzer.tables))
+    }
+
+    #[test]
+    fn test_push() {
+        let code: &'static str = "5";
+        let (node, mut memory) = exec_memory(code);
+        memory.emit(&node);
+        assert_eq!(Vec::from([OpCode::PushUint32(5)]), *memory.get_opcodes());
+    }
+    #[test]
+    fn test_push2() {
+        let code: &'static str = "5.0";
+        let (node, mut memory) = exec_memory(code);
+        memory.emit(&node);
+        assert_eq!(Vec::from([OpCode::PushFloat64(5.0)]), *memory.get_opcodes());
+    }
+    #[test]
+    fn test_expr() {
+        let code: &'static str = "5 + 4";
+        let (node, mut memory) = exec_memory(code);
+        memory.emit(&node);
+        assert_eq!(
+            Vec::from([OpCode::PushUint32(5), OpCode::PushUint32(4), OpCode::Add]),
+            *memory.get_opcodes()
+        );
+    }
+    #[test]
+    #[should_panic]
+    fn test_expr2() {
+        let code: &'static str = "5 + 4.5";
+        let (node, mut memory) = exec_memory(code);
+        memory.emit(&node);
+    }
+    #[test]
+    fn test_let() {
+        let code: &'static str = "let x = 5 + 4";
+        let (node, mut memory) = exec_memory(code);
+        memory.emit(&node);
+        assert_eq!(
+            Vec::from([
+                OpCode::PushUint32(5),
+                OpCode::PushUint32(4),
+                OpCode::Add,
+                OpCode::Store(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                })
+            ]),
+            *memory.get_opcodes()
+        );
+    }
+    #[test]
+    fn test_const() {
+        let code: &'static str = "const x = 5 + 4";
+        let (node, mut memory) = exec_memory(code);
+        memory.emit(&node);
+        assert_eq!(
+            Vec::from([
+                OpCode::PushUint32(5),
+                OpCode::PushUint32(4),
+                OpCode::Add,
+                OpCode::Store(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                })
+            ]),
+            *memory.get_opcodes()
+        );
+    }
+    #[test]
+    fn test_block() {
+        let code: &'static str = "const x = {5 + 4}";
+        let (node, mut memory) = exec_memory(code);
+        memory.emit(&node);
+        assert_eq!(
+            Vec::from([
+                OpCode::ScopeStart(1),
+                OpCode::PushUint32(5),
+                OpCode::PushUint32(4),
+                OpCode::Add,
+                OpCode::ScopeEnd(1),
+                OpCode::Store(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                })
+            ]),
+            *memory.get_opcodes()
+        );
+    }
+    #[test]
+    fn test_assign() {
+        // TODO: Modifiy Parser to accept "let x = 5; x += 4"
+        let code: &'static str = "let x = 5;
+        x += 4";
+        let (node, mut memory) = exec_memory(code);
+        memory.emit(&node);
+        assert_eq!(
+            Vec::from([
+                OpCode::PushUint32(5),
+                OpCode::Store(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                }),
+                OpCode::Load(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                }),
+                OpCode::PushUint32(4),
+                OpCode::Add,
+                OpCode::Store(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                })
+            ]),
+            *memory.get_opcodes()
+        );
+    }
+    #[test]
+    fn test_assign2() {
+        let code: &'static str = "let x = 5;
+        x /= 4";
+        let (node, mut memory) = exec_memory(code);
+        memory.emit(&node);
+        assert_eq!(
+            Vec::from([
+                OpCode::PushUint32(5),
+                OpCode::Store(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                }),
+                OpCode::Load(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                }),
+                OpCode::PushUint32(4),
+                OpCode::Div,
+                OpCode::Store(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                })
+            ]),
+            *memory.get_opcodes()
+        );
+    }
+    #[test]
+    fn test_assign_new() {
+        let code: &'static str = "x <- 5;
+        x /= 4";
+        let (node, mut memory) = exec_memory(code);
+        memory.emit(&node);
+        assert_eq!(
+            Vec::from([
+                OpCode::PushUint32(5),
+                OpCode::Store(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                }),
+                OpCode::Load(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                }),
+                OpCode::PushUint32(4),
+                OpCode::Div,
+                OpCode::Store(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                })
+            ]),
+            *memory.get_opcodes()
+        );
+    }
+    #[test]
+    fn test_assign3() {
+        let code: &'static str = "x <- 5;
+        x ||= 4";
+        let (node, mut memory) = exec_memory(code);
+        memory.emit(&node);
+        assert_eq!(
+            Vec::from([
+                OpCode::PushUint32(5),
+                OpCode::Store(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                }),
+                OpCode::Load(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                }),
+                OpCode::PushUint32(4),
+                OpCode::Or,
+                OpCode::Store(Sym {
+                    id: gen_ident_id("x"),
+                    depth: 0
+                })
+            ]),
+            *memory.get_opcodes()
+        );
     }
 }

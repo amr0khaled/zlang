@@ -19,7 +19,7 @@ impl NodeDetails {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[allow(dead_code)]
 pub enum Node<'a> {
     // ===References===
