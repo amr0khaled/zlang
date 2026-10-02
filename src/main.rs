@@ -40,9 +40,9 @@ fn main() {
     let node = &mut Box::new(parser.parse());
     let mut analyzer = Analyzer::new();
     analyzer.scope_check(node);
-    let mut cg = Memory::new(analyzer.tables);
-    cg.emit(node);
-    let ins = cg.get_instructions();
+    // let mut cg = Memory::new(analyzer.tables);
+    // cg.emit(node);
+    // let ins = cg.get_instructions();
     let node_struct = format!("Node: {:#?}", node);
 
     let file_splits = filename.split('.');
@@ -63,10 +63,10 @@ fn main() {
         Ok(()) => {}
         Err(e) => panic!("FS Error: {:?}", e),
     }
-    match overwrite_file(&opcode_file, format!("{:#?}", ins)) {
-        Ok(()) => {}
-        Err(e) => panic!("FS Error: {:?}", e),
-    }
+    // match overwrite_file(&opcode_file, format!("{:#?}", ins)) {
+    //     Ok(()) => {}
+    //     Err(e) => panic!("FS Error: {:?}", e),
+    // }
 
     // let mut toknizer = Tokenizer::new(line);
     // println!("token: {:#?}", toknizer.next_token());

@@ -42,7 +42,7 @@ impl<'a> Memory<'a> {
     pub fn emit(&mut self, node: &Node) {
         match node {
             Node::Ref(_, _) => todo!(),
-            Node::IntegerLit { v, .. } => {
+            Node::IntLit { v, .. } => {
                 self.push_uint32(*v as u32);
             }
             Node::FloatLit { v, .. } => {
@@ -61,8 +61,8 @@ impl<'a> Memory<'a> {
             }
             Node::UnaryExpr { op, node, ty, .. } => {
                 self.emit(node);
-                let op = OpCode::operator_to_opcode(op, ty);
-                self.push(op);
+                // let op = OpCode::operator_to_opcode(op, ty);
+                // self.push(op);
             }
             Node::BinaryExpr {
                 op,
@@ -73,8 +73,8 @@ impl<'a> Memory<'a> {
             } => {
                 self.emit(left);
                 self.emit(right);
-                let op = OpCode::operator_to_opcode(op, ty);
-                self.push(op);
+                // let op = OpCode::operator_to_opcode(op, &ty);
+                // self.push(op);
             }
             Node::AssignStmt { op, value, r, .. } => {
                 if let Some(a) = r {
@@ -100,14 +100,14 @@ impl<'a> Memory<'a> {
                 panic!("Unknown Reference")
             }
             Node::CallExpr { .. } => todo!("Call expr"),
-            Node::VarDeclStmt { value, r, .. } => {
+            Node::LetDecl { value, r, .. } => {
                 self.emit(value);
                 println!("{:#?}", r);
                 if let Some(a) = r {
                     self.store(Sym::from(a));
                 }
             }
-            Node::ConstDeclStmt { value, r, .. } => {
+            Node::ConstDecl { value, r, .. } => {
                 self.emit(value);
                 if let Some(a) = r {
                     self.store(Sym::from(a));
@@ -149,6 +149,7 @@ impl<'a> Memory<'a> {
                 }
             }
             Node::Empty => todo!(),
+            _ => todo!(),
         }
     }
     fn lookup(&self, id: u32, depth: usize) -> Option<Rc<RefCell<Symbol<'a>>>> {

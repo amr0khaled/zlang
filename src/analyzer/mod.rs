@@ -9,7 +9,10 @@ use crate::{
         },
         symbol::{Symbol, SymbolTable, SymbolType},
     },
-    parser::{node::Node, ops::Operator},
+    parser::{
+        node::{DataType, Node},
+        ops::Operator,
+    },
 };
 mod scope;
 pub mod symbol;
@@ -90,23 +93,27 @@ impl<'a> Analyzer<'a> {
                 self.tables.pop();
                 ty
             }
-            Node::VarDeclStmt {
-                ident,
+            Node::LetDecl {
+                decl,
                 info,
                 value,
                 r,
                 ..
             } => {
+                let ident = match &mut **decl {
+                    Node::Decl { ident, .. } => *ident,
+                    _ => panic!("Syntax error: Expected identifier not this {:?}", decl),
+                };
                 let id = gen_ident_id(ident);
                 let ty = self.scope_check(value);
                 let depth = self.tables.len() - 1;
                 let scope = self.scopes.get();
                 match scope.lookup(&id) {
                     Some(ScopeRes::Local(_)) => {
-                        panic_log!(info, "Redeclaration of '{}'", ident)
+                        panic_log!(info, "Redeclaration of '{:?}'", decl)
                     }
                     _ => {
-                        let symbol = Symbol::new(ident, ty, depth);
+                        let symbol = Symbol::new(&ident, ty, depth);
                         scope
                             .get()
                             .borrow_mut()
@@ -116,13 +123,17 @@ impl<'a> Analyzer<'a> {
                 }
                 SymbolType::Void
             }
-            Node::ConstDeclStmt {
-                ident,
+            Node::ConstDecl {
+                decl,
                 info,
                 value,
                 r,
                 ..
             } => {
+                let ident = match &mut **decl {
+                    Node::Decl { ident, .. } => *ident,
+                    _ => panic!("Syntax error: Expected identifier not this {:?}", decl),
+                };
                 let id = gen_ident_id(ident);
                 let ty = self.scope_check(value);
                 if !ty.is_initialized() {
@@ -137,7 +148,7 @@ impl<'a> Analyzer<'a> {
                         // println!(" on line {}", ident, info.line)
                     }
                     _ => {
-                        let symbol = Symbol::new_const(ident, ty, depth);
+                        let symbol = Symbol::new_const(&ident, ty, depth);
                         scope
                             .get()
                             .borrow_mut()
@@ -156,14 +167,15 @@ impl<'a> Analyzer<'a> {
                         println!("Found: {:#?}", sym);
                         *r = Some(Box::new(Node::Ref(id, sym.depth().clone())));
                         let _ty = sym.get_type();
-                        *ty = Some(_ty.clone());
+                        *ty = Some(DataType::from_symbol(_ty));
                         _ty
                     }
                     None => panic_log!(info, "Undeclared Variable '{}'", name), //panic!(" on line {}", name, info.line),
                 }
             }
-            Node::IntegerLit { .. } => SymbolType::Integer,
-            Node::FloatLit { .. } => SymbolType::Float,
+            // TODO: Rewrite this
+            Node::IntLit { .. } => SymbolType::Signed32,
+            Node::FloatLit { .. } => SymbolType::Float32,
             Node::BooleanLit { .. } => SymbolType::Boolean,
             Node::Dynamic => SymbolType::Uninitialized,
             Node::AssignStmt {
@@ -237,11 +249,9 @@ impl<'a> Analyzer<'a> {
             Node::UnaryExpr { node, info, ty, .. } => {
                 let mut node_mut = node;
                 match self.scope_check(&mut node_mut) {
-                    x if x == SymbolType::Integer
-                        || x == SymbolType::Float
-                        || x == SymbolType::Boolean =>
-                    {
-                        *ty = Some(x);
+                    // TODO: Check the types
+                    x if x.is_literal() => {
+                        *ty = Some(DataType::from_symbol(x));
                         x
                     }
                     y => panic!(
@@ -258,8 +268,9 @@ impl<'a> Analyzer<'a> {
                 ..
             } => {
                 let left_ty = match self.scope_check(left) {
-                    x if x == SymbolType::Integer || x == SymbolType::Float => {
-                        *ty = Some(x);
+                    // TODO: Check the types
+                    x if x.is_literal() => {
+                        *ty = Some(DataType::from_symbol(x));
                         x
                     }
                     y => panic!(
@@ -268,7 +279,8 @@ impl<'a> Analyzer<'a> {
                     ),
                 };
                 let right_ty = match self.scope_check(right) {
-                    x if x == SymbolType::Integer || x == SymbolType::Float => x,
+                    // TODO: Check the types
+                    x if x.is_literal() => x,
                     y => panic!(
                         "This type '{:#?}' is not supported in BinaryExpr\n: Error: {:#?}",
                         y, info
@@ -291,5 +303,69 @@ impl<'a> Analyzer<'a> {
             // Node::ExprStmt { node, info } => todo!(),
             _ => SymbolType::Void,
         }
+    }
+}
+
+#[cfg(test)]
+#[deny(dead_code)]
+mod tests {
+    use crate::{
+        analyzer::{self, Analyzer},
+        parser::{Parser, node::NodeDetails},
+    };
+
+    #[test]
+    fn test_correct_let_expr() {
+        let line = "let x = 5;";
+        let mut parser = Parser::new(line);
+
+        let var_info = NodeDetails::new(1, 1);
+        let decl_info = NodeDetails::new(1, 5);
+        let integer_info = NodeDetails::new(1, 9);
+        let mut node = Box::new(parser.parse());
+
+        let mut analyzer = Analyzer::new();
+        analyzer.scope_check(&mut node);
+    }
+    #[test]
+    fn test_correct_let_expr2() {
+        let line = "let t = 3; let x = t + 5;";
+        let mut parser = Parser::new(line);
+
+        let var_info = NodeDetails::new(1, 1);
+        let decl_info = NodeDetails::new(1, 5);
+        let integer_info = NodeDetails::new(1, 9);
+        let mut node = Box::new(parser.parse());
+
+        let mut analyzer = Analyzer::new();
+        analyzer.scope_check(&mut node);
+    }
+    #[test]
+    #[should_panic]
+    fn test_incorrect_let_expr() {
+        let line = "let x t = 5;";
+        let mut parser = Parser::new(line);
+
+        let var_info = NodeDetails::new(1, 1);
+        let decl_info = NodeDetails::new(1, 5);
+        let integer_info = NodeDetails::new(1, 9);
+        let mut node = Box::new(parser.parse());
+
+        let mut analyzer = Analyzer::new();
+        analyzer.scope_check(&mut node);
+    }
+    #[test]
+    #[should_panic]
+    fn test_incorrect_let_expr2() {
+        let line = "let x  = t 5;";
+        let mut parser = Parser::new(line);
+
+        let var_info = NodeDetails::new(1, 1);
+        let decl_info = NodeDetails::new(1, 5);
+        let integer_info = NodeDetails::new(1, 9);
+        let mut node = Box::new(parser.parse());
+
+        let mut analyzer = Analyzer::new();
+        analyzer.scope_check(&mut node);
     }
 }

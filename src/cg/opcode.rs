@@ -92,13 +92,13 @@ pub enum OpCode {
 impl OpCode {
     pub fn operator_to_opcode(op: &Operator, ty: &Option<SymbolType>) -> Self {
         match (op, ty) {
-            (Operator::Add, Some(SymbolType::Float)) => Fadd,
+            (Operator::Add, Some(SymbolType::Float32)) => Fadd,
             (Operator::Add, _) => Add,
-            (Operator::Sub, Some(SymbolType::Float)) => Fsub,
+            (Operator::Sub, Some(SymbolType::Float32)) => Fsub,
             (Operator::Sub, _) => Sub,
-            (Operator::Mul, Some(SymbolType::Float)) => Fimul, // TODO: Need to idenitify imul from mul
+            (Operator::Mul, Some(SymbolType::Float32)) => Fimul, // TODO: Need to idenitify imul from mul
             (Operator::Mul, _) => Imul,
-            (Operator::Div, Some(SymbolType::Float)) => Fdiv,
+            (Operator::Div, Some(SymbolType::Float32)) => Fdiv,
             (Operator::Div, _) => Div,
             (Operator::Power, _) => Power,
             (Operator::Mod, _) => Mod,
@@ -121,13 +121,13 @@ impl OpCode {
         match (op, ty) {
             (Operator::Assign, _) => Nop,
             (Operator::AssignNew, _) => Nop,
-            (Operator::AssignPlus, SymbolType::Float) => Fadd,
+            (Operator::AssignPlus, SymbolType::Float32) => Fadd,
             (Operator::AssignPlus, _) => Add,
-            (Operator::AssignMinus, SymbolType::Float) => Fsub,
+            (Operator::AssignMinus, SymbolType::Float32) => Fsub,
             (Operator::AssignMinus, _) => Sub,
-            (Operator::AssignMultiply, SymbolType::Float) => Fimul,
+            (Operator::AssignMultiply, SymbolType::Float32) => Fimul,
             (Operator::AssignMultiply, _) => Imul,
-            (Operator::AssignDivide, SymbolType::Float) => Fdiv,
+            (Operator::AssignDivide, SymbolType::Float32) => Fdiv,
             (Operator::AssignDivide, _) => Div,
             (Operator::AssignPower, _) => Power,
             (Operator::AssignAnd, _) => And,

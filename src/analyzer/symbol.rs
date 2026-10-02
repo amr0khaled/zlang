@@ -1,11 +1,19 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::analyzer::gen_ident_id;
+use crate::{analyzer::gen_ident_id, lexer::types::TokenType};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SymbolType {
-    Integer,
-    Float,
+    Unsigned8,
+    Signed8,
+    Unsigned16,
+    Signed16,
+    Unsigned32,
+    Signed32,
+    Unsigned64,
+    Signed64,
+    Float32,
+    Float64,
     Boolean,
     Uninitialized,
     Void,
@@ -14,8 +22,8 @@ pub enum SymbolType {
 impl SymbolType {
     pub fn is_literal(&self) -> bool {
         match self {
-            SymbolType::Integer | SymbolType::Float | SymbolType::Boolean => true,
-            _ => false,
+            SymbolType::Uninitialized | SymbolType::Void => false,
+            _ => true,
         }
     }
     pub fn is_initialized(&self) -> bool {

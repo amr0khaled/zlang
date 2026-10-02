@@ -103,3 +103,10 @@ pub fn overwrite_file(filename: &str, content: String) -> Result<(), std::io::Er
 pub fn append_file(filename: &str, content: String) -> Result<(), std::io::Error> {
     write_file(false, filename, content)
 }
+
+#[macro_export]
+macro_rules! error {
+    ($inf:ident, $($arg:tt)*) => {{
+        println!("{} : {}", $inf.log(), format_args!($($arg)*));
+    }};
+}
