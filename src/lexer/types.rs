@@ -56,14 +56,27 @@ pub enum TokenType : u64 {
     // Keyword
     Let,
     Const,
-    Int,
+    Function,
     Return,
+    // Data types
+    U8,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
+    I32,
+    I64,
+    F32,
+    F64,
+    Bool,
     // Literal
     Ident,
-    IntegerLiteral, // 34
+    IntLiteral, // 34
     FloatLiteral,   // 4.3
     BoolLiteral,    // true / false
     Uninitialized,    // true / false
+    Colon, // :
     // Ends
     EOF,       // End of file // -1
     SemiColon, // ;

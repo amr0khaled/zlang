@@ -98,7 +98,7 @@ impl<'a> Tokenizer<'a> {
         if has_dot {
             self.tokenize(TokenType::FloatLiteral, len)
         } else {
-            self.tokenize(TokenType::IntegerLiteral, len)
+            self.tokenize(TokenType::IntLiteral, len)
         }
     }
     fn lookup_symbols(&mut self) -> Option<Token<'a>> {
@@ -109,6 +109,10 @@ impl<'a> Tokenizer<'a> {
                 self.line += 1;
                 self.col = 1;
                 Some(self.tokenize(TokenType::EOL, 1))
+            }
+            ':' => {
+                self.advance_by(1);
+                Some(self.tokenize(TokenType::Colon, 1))
             }
             ';' => {
                 self.advance_by(1);
@@ -303,11 +307,23 @@ impl<'a> Tokenizer<'a> {
         match buf.as_str() {
             // declaration
             "let" => self.tokenize(TokenType::Let, len),
-            "int" => self.tokenize(TokenType::Int, len),
+            "fn" => self.tokenize(TokenType::Function, len),
             "const" => self.tokenize(TokenType::Const, len),
             "true" => self.tokenize(TokenType::BoolLiteral, len),
             "false" => self.tokenize(TokenType::BoolLiteral, len),
             "return" => self.tokenize(TokenType::Return, len),
+            // Data types
+            "u8" => self.tokenize(TokenType::U8, len),
+            "u16" => self.tokenize(TokenType::U16, len),
+            "u32" => self.tokenize(TokenType::U32, len),
+            "u64" => self.tokenize(TokenType::U64, len),
+            "i8" => self.tokenize(TokenType::I8, len),
+            "i16" => self.tokenize(TokenType::I16, len),
+            "i32" => self.tokenize(TokenType::I32, len),
+            "i64" => self.tokenize(TokenType::I64, len),
+            "f32" => self.tokenize(TokenType::F32, len),
+            "f64" => self.tokenize(TokenType::F64, len),
+            "bool" => self.tokenize(TokenType::Bool, len),
             _ => self.tokenize(TokenType::Ident, len),
         }
     }
@@ -334,36 +350,6 @@ impl<'a> Tokenizer<'a> {
 #[cfg(test)]
 mod tests {
     use crate::lexer::{Token, Tokenizer, types::TokenType};
-
-    #[test]
-    fn test_int_tokenizers() {
-        let line = "int x = 5;";
-        let mut tokenizer = Tokenizer::new(line);
-        assert_eq!(
-            Token::new(TokenType::Int, "int", 1, 1),
-            tokenizer.next_token()
-        );
-        assert_eq!(
-            Token::new(TokenType::Ident, "x", 1, 5),
-            tokenizer.next_token()
-        );
-        assert_eq!(
-            Token::new(TokenType::Assign, "=", 1, 7),
-            tokenizer.next_token()
-        );
-        assert_eq!(
-            Token::new(TokenType::IntegerLiteral, "5", 1, 9),
-            tokenizer.next_token()
-        );
-        assert_eq!(
-            Token::new(TokenType::SemiColon, ";", 1, 10),
-            tokenizer.next_token()
-        );
-        assert_eq!(
-            Token::new(TokenType::EOF, "", 1, 11),
-            tokenizer.next_token()
-        );
-    }
 
     #[test]
     fn test_let_tokenizers() {
@@ -394,7 +380,81 @@ mod tests {
             tokenizer.next_token()
         );
     }
+    #[test]
+    fn test_function_decl() {
+        let line = "fn name() {}";
+        let mut tokenizer = Tokenizer::new(line);
+        assert_eq!(
+            Token::new(TokenType::Function, "fn", 1, 1),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::Ident, "name", 1, 4),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::OpenParenthese, "(", 1, 8),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::CloseParenthese, ")", 1, 9),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::OpenBracket, "{", 1, 11),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::CloseBracket, "}", 1, 12),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::EOF, "", 1, 13),
+            tokenizer.next_token()
+        );
+    }
 
+    #[test]
+    fn test_function_decl2() {
+        let line = "fn name[]() {}";
+        let mut tokenizer = Tokenizer::new(line);
+        assert_eq!(
+            Token::new(TokenType::Function, "fn", 1, 1),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::Ident, "name", 1, 4),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::OpenSquareBracket, "[", 1, 8),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::CloseSquareBracket, "]", 1, 9),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::OpenParenthese, "(", 1, 10),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::CloseParenthese, ")", 1, 11),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::OpenBracket, "{", 1, 13),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::CloseBracket, "}", 1, 14),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::EOF, "", 1, 15),
+            tokenizer.next_token()
+        );
+    }
     #[test]
     fn test_function_tokenizers() {
         let line = "print(1, 2, 3)";
@@ -408,7 +468,7 @@ mod tests {
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::IntegerLiteral, "1", 1, 7),
+            Token::new(TokenType::IntLiteral, "1", 1, 7),
             tokenizer.next_token()
         );
         assert_eq!(
@@ -416,7 +476,7 @@ mod tests {
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::IntegerLiteral, "2", 1, 10),
+            Token::new(TokenType::IntLiteral, "2", 1, 10),
             tokenizer.next_token()
         );
         assert_eq!(
@@ -424,7 +484,7 @@ mod tests {
             tokenizer.next_token()
         );
         assert_eq!(
-            Token::new(TokenType::IntegerLiteral, "3", 1, 13),
+            Token::new(TokenType::IntLiteral, "3", 1, 13),
             tokenizer.next_token()
         );
         assert_eq!(
