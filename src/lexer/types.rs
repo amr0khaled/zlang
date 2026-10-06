@@ -75,7 +75,7 @@ pub enum TokenType : u64 {
     IntLiteral, // 34
     FloatLiteral,   // 4.3
     BoolLiteral,    // true / false
-    Uninitialized,    // true / false
+    Uninitialized,
     Colon, // :
     // Ends
     EOF,       // End of file // -1

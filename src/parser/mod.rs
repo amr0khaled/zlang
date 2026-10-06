@@ -2,10 +2,7 @@ use core::panic;
 
 use crate::{
     error,
-    lexer::{
-        Token, Tokenizer,
-        types::TokenType::{self, CloseParenthese, CloseSquareBracket},
-    },
+    lexer::{Token, Tokenizer, types::TokenType},
     parser::{
         node::{DataType, Node},
         ops::{Operator, get_hint},
@@ -20,7 +17,7 @@ macro_rules! expect {
         let kind = got.kind;
         match kind {
             $patt $(if $guard)? => got,
-            d => panic!("Line {}: Syntax Error: Expected {:#?}, but got {:?}", got.line, stringify!($patt), d)
+            d => panic!("Line {}: Syntax Error: Expected {:#?}, but got {:#?}", got.line, stringify!($patt), d)
         }
     }};
     ($self:ident, $fn:path) => {
@@ -93,37 +90,20 @@ impl<'a> Parser<'a> {
         }
         node
     }
-    // Determine parameters or args between []
-    fn parse_params(&mut self) -> Vec<Box<Node<'a>>> {
+    // Determine parameters or args between [] or () based on Closing condition token type
+    fn parse_params(&mut self, condition_token: TokenType) -> Vec<Box<Node<'a>>> {
         let mut params: Vec<Box<Node<'a>>> = vec![];
-        expect!(self, TokenType::OpenSquareBracket);
-        if self.peek().kind != TokenType::CloseSquareBracket {
+        if self.peek().kind != condition_token {
             loop {
-                if self.peek().kind == CloseSquareBracket {
+                if self.peek().kind == condition_token {
                     break;
                 }
                 let node = self.parse_arg();
                 params.push(Box::new(node));
             }
         }
-        expect!(self, TokenType::CloseSquareBracket);
+        expect!(self, condition_token);
         params
-    }
-    // Determine parameters or args between ()
-    fn parse_args(&mut self) -> Vec<Box<Node<'a>>> {
-        let mut args: Vec<Box<Node<'a>>> = vec![];
-        expect!(self, TokenType::OpenParenthese);
-        if self.peek().kind != TokenType::CloseParenthese {
-            loop {
-                if self.peek().kind == CloseParenthese {
-                    break;
-                }
-                let node = self.parse_arg();
-                args.push(Box::new(node));
-            }
-        }
-        expect!(self, TokenType::CloseParenthese);
-        args
     }
     fn parse_primary(&mut self) -> Node<'a> {
         let token = self.next();
@@ -175,9 +155,11 @@ impl<'a> Parser<'a> {
                 let mut args: Vec<Box<Node<'a>>> = vec![];
                 let mut params: Vec<Box<Node<'a>>> = vec![];
                 if self.peek().kind == TokenType::OpenSquareBracket {
-                    params = self.parse_params();
+                    expect!(self, TokenType::OpenSquareBracket);
+                    params = self.parse_params(TokenType::CloseSquareBracket);
                 }
-                args = self.parse_args();
+                expect!(self, TokenType::OpenParenthese);
+                args = self.parse_params(TokenType::CloseParenthese);
                 let mut block = Box::new(self.parse_primary());
                 if let Node::Block { is_body, .. } = &mut (*block) {
                     *is_body = true;
@@ -206,9 +188,11 @@ impl<'a> Parser<'a> {
                     let mut params = vec![];
                     let mut args = vec![];
                     if self.peek().kind == TokenType::OpenSquareBracket {
-                        params = self.parse_params();
+                        expect!(self, TokenType::OpenSquareBracket);
+                        params = self.parse_params(TokenType::CloseSquareBracket);
                     }
-                    args = self.parse_args();
+                    expect!(self, TokenType::OpenParenthese);
+                    args = self.parse_params(TokenType::CloseParenthese);
                     Node::CallExpr {
                         ident,
                         params,
@@ -234,47 +218,51 @@ impl<'a> Parser<'a> {
                 info,
             },
             TokenType::Increment => {
+                let op;
+                let node;
                 if self.peek().kind == TokenType::Ident {
-                    self.next();
-                    let op = Operator::PreIncrement;
-                    Node::UnaryExpr {
-                        op,
-                        node: Box::new(self.parse_primary()),
-                        kind: get_hint(op),
+                    let ident = self.next();
+                    node = Node::IdentExpr {
+                        name: ident.pointer,
+                        r: None,
                         ty: None,
                         info,
-                    }
+                    };
+                    op = Operator::PreIncrement;
                 } else {
-                    let op = Operator::PostIncrement;
-                    Node::UnaryExpr {
-                        op,
-                        node: Box::new(self.parse_primary()),
-                        kind: get_hint(op),
-                        ty: None,
-                        info,
-                    }
+                    op = Operator::PostIncrement;
+                    node = Node::Empty;
+                }
+                Node::UnaryExpr {
+                    op,
+                    node: Box::new(node),
+                    kind: get_hint(op),
+                    ty: None,
+                    info,
                 }
             }
             TokenType::Decrement => {
+                let op;
+                let node;
                 if self.peek().kind == TokenType::Ident {
-                    self.next();
-                    let op = Operator::PreDecrement;
-                    Node::UnaryExpr {
-                        op,
-                        node: Box::new(self.parse_primary()),
-                        kind: get_hint(op),
+                    let ident = self.next();
+                    node = Node::IdentExpr {
+                        name: ident.pointer,
+                        r: None,
                         ty: None,
                         info,
-                    }
+                    };
+                    op = Operator::PreDecrement;
                 } else {
-                    let op = Operator::PostDecrement;
-                    Node::UnaryExpr {
-                        op,
-                        node: Box::new(self.parse_primary()),
-                        kind: get_hint(op),
-                        ty: None,
-                        info,
-                    }
+                    node = Node::Empty;
+                    op = Operator::PostDecrement;
+                }
+                Node::UnaryExpr {
+                    op,
+                    node: Box::new(node),
+                    kind: get_hint(op),
+                    ty: None,
+                    info,
                 }
             }
             TokenType::OpenBracket => self.parse_block(),
@@ -287,29 +275,38 @@ impl<'a> Parser<'a> {
         result
     }
     fn parse_expr(&mut self) -> Node<'a> {
-        println!("expr");
-        println!("expr: left {:#?}", self.peek().kind);
-        let mut left = self.parse_primary();
+        #[cfg(test)]
+        {
+            println!("expr");
+            println!("expr: left {:#?}", self.peek().kind);
+        }
+        println!("SSS");
+        let left = self.parse_primary();
+        self.parse_expr_remain(left)
+    }
+    fn parse_expr_remain(&mut self, mut left: Node<'a>) -> Node<'a> {
+        #[cfg(test)]
+        {
+            println!("expr remain");
+            println!("expr: right {:#?}", self.peek().kind);
+        }
         match self.peek().kind {
             // WARNING: I don't know what is this but be careful
-            TokenType::Ident => loop {},
+            // TokenType::Ident => loop {},
             _ => loop {
-                let op = match self.peek().kind {
-                    TokenType::Plus => Operator::Add,
-                    TokenType::Minus => Operator::Sub,
-                    TokenType::Multiply => Operator::Mul,
-                    TokenType::Divide => Operator::Div,
-                    TokenType::Power => Operator::Power,
-                    _ => break,
-                };
+                let op = Operator::from_token(self.peek().kind);
+                if op == None {
+                    break;
+                    // panic!("Unexpected token: {:#?}", token)
+                }
                 self.next();
                 println!("expr: right");
                 let right = self.parse_primary();
                 left = Node::BinaryExpr {
-                    op,
+                    op: op.unwrap(),
                     left: Box::new(left),
                     right: Box::new(right),
-                    kind: get_hint(op),
+                    kind: get_hint(op.unwrap()),
                     ty: None,
                     info: Node::info(&self.peek()),
                 };
@@ -504,9 +501,11 @@ impl<'a> Parser<'a> {
         let mut params = vec![];
         let mut args = vec![];
         if self.peek().kind == TokenType::OpenSquareBracket {
-            params = self.parse_params();
+            expect!(self, TokenType::OpenSquareBracket);
+            params = self.parse_params(TokenType::CloseSquareBracket);
         }
-        args = self.parse_args();
+        expect!(self, TokenType::OpenParenthese);
+        args = self.parse_params(TokenType::CloseParenthese);
         Node::CallExpr {
             ident,
             params,
@@ -526,7 +525,28 @@ impl<'a> Parser<'a> {
                 let peek = self.peek();
                 let info = Node::info(&ident);
                 match peek.kind {
-                    _ if is_assign_operator(peek.kind) => self.parse_assign(&ident),
+                    x if is_assign_operator(x) => self.parse_assign(&ident),
+                    x if is_operator(x) => {
+                        let left = Node::IdentExpr {
+                            name: ident.pointer,
+                            r: None,
+                            ty: None,
+                            info,
+                        };
+                        self.parse_expr_remain(left)
+                    }
+                    x if is_unary_operator(x) => {
+                        let mut _node = self.parse_primary();
+                        if let Node::UnaryExpr { node, .. } = &mut _node {
+                            *node = Box::new(Node::IdentExpr {
+                                name: ident.pointer,
+                                r: None,
+                                ty: None,
+                                info,
+                            })
+                        }
+                        _node
+                    }
                     TokenType::OpenSquareBracket | TokenType::OpenParenthese => {
                         self.parse_call(&ident)
                     }
@@ -580,7 +600,6 @@ impl<'a> Parser<'a> {
             let stmt = self.parse_statement();
             if !matches!(stmt, Node::Empty) {
                 stmts.push(Box::new(stmt));
-                println!("END");
             }
         }
         Node::Program {
@@ -643,6 +662,14 @@ fn is_operator(ty: TokenType) -> bool {
         _ => false,
     }
 }
+fn is_unary_operator(ty: TokenType) -> bool {
+    match ty {
+        TokenType::Not => true,
+        TokenType::Increment => true,
+        TokenType::Decrement => true,
+        _ => false,
+    }
+}
 
 fn is_literal(ty: TokenType) -> bool {
     match ty {
@@ -672,431 +699,736 @@ fn is_datatype(ty: TokenType) -> bool {
 }
 #[cfg(test)]
 mod tests {
-    use crate::parser::{
-        Parser,
-        node::{DataType, Node, NodeDetails},
-    };
+    use super::*;
+    use crate::parser::node::NodeDetails;
 
-    #[test]
-    fn test_let() {
-        let line = "let x = 5;";
-        let mut parser = Parser::new(line);
+    mod declaration_tests {
+        use super::*;
+        const PRIMITIVE_TYPES: &[(&str, DataType)] = &[
+            ("u8", DataType::Unsigned8),
+            ("u16", DataType::Unsigned16),
+            ("u32", DataType::Unsigned32),
+            ("u64", DataType::Unsigned64),
+            ("i8", DataType::Signed8),
+            ("i16", DataType::Signed16),
+            ("i32", DataType::Signed32),
+            ("i64", DataType::Signed64),
+            ("f32", DataType::Float32),
+            ("f64", DataType::Float64),
+            ("bool", DataType::Boolean),
+        ];
+        #[test]
+        fn test_let() {
+            let line = "let x = 5;";
+            let mut parser = Parser::new(line);
 
-        let var_info = NodeDetails::new(1, 1);
-        let decl_info = NodeDetails::new(1, 5);
-        let integer_info = NodeDetails::new(1, 9);
-        assert_eq!(
-            Node::Program {
-                statements: Vec::from([Box::new(Node::LetDecl {
-                    r: None,
-                    decl: Box::new(Node::Decl {
-                        ident: "x",
-                        ty: Some(DataType::Dynamic),
-                        kind: "Decl",
-                        info: decl_info
-                    }),
-                    value: Box::new(Node::IntLit {
-                        v: 5,
-                        size: 8,
-                        info: integer_info
-                    }),
-                    kind: "LetDecl",
-                    info: var_info
-                })]),
-                kind: "ProgramNode"
-            },
-            parser.parse()
-        );
-    }
+            let var_info = NodeDetails::new(1, 1);
+            let decl_info = NodeDetails::new(1, 5);
+            let integer_info = NodeDetails::new(1, 9);
+            assert_eq!(
+                Node::Program {
+                    statements: Vec::from([Box::new(Node::LetDecl {
+                        r: None,
+                        decl: Box::new(Node::Decl {
+                            ident: "x",
+                            ty: Some(DataType::Dynamic),
+                            kind: "Decl",
+                            info: decl_info
+                        }),
+                        value: Box::new(Node::IntLit {
+                            v: 5,
+                            size: 8,
+                            info: integer_info
+                        }),
+                        kind: "LetDecl",
+                        info: var_info
+                    })]),
+                    kind: "ProgramNode"
+                },
+                parser.parse()
+            );
+        }
+        #[test]
+        fn test_let_with_type() {
+            for &(sym, ref ty) in PRIMITIVE_TYPES {
+                let line = format!("let x: {} = 5;", sym);
+                let mut parser = Parser::new(&line);
 
-    #[test]
-    fn test_let_block() {
-        let line = "let x = {5};";
-        let mut parser = Parser::new(line);
-        let decl_info = NodeDetails::new(1, 5);
-        let var_info = NodeDetails::new(1, 1);
-        let block_info = NodeDetails::new(1, 10);
-        let integer_info = NodeDetails::new(1, 10);
-        let return_info = NodeDetails::new(1, 11);
-        assert_eq!(
-            Node::Program {
-                statements: Vec::from([Box::new(Node::LetDecl {
-                    r: None,
-                    decl: Box::new(Node::Decl {
-                        ident: "x",
-                        ty: Some(DataType::Dynamic),
-                        kind: "Decl",
-                        info: decl_info
-                    }),
-                    value: Box::new(Node::Block {
-                        is_body: false,
-                        depth: None,
-                        statements: Vec::from([Box::new(Node::ReturnExpr {
-                            node: Box::new(Node::IntLit {
-                                v: 5,
-                                size: 8,
-                                info: integer_info
-                            }),
-                            info: return_info
-                        })]),
-                        kind: "LocalScope",
-                        info: block_info
-                    }),
-                    kind: "LetDecl",
-                    info: var_info
-                })]),
-                kind: "ProgramNode"
-            },
-            parser.parse()
-        );
-    }
-    #[test]
-
-    fn test_let_block_with_return() {
-        let line = "let x = {return 5;};";
-        let mut parser = Parser::new(line);
-        let decl_info = NodeDetails::new(1, 5);
-        let var_info = NodeDetails::new(1, 1);
-        let block_info = NodeDetails::new(1, 10);
-        let integer_info = NodeDetails::new(1, 17);
-        let return_info = NodeDetails::new(1, 10);
-        assert_eq!(
-            Node::Program {
-                statements: Vec::from([Box::new(Node::LetDecl {
-                    r: None,
-                    decl: Box::new(Node::Decl {
-                        ident: "x",
-                        ty: Some(DataType::Dynamic),
-                        kind: "Decl",
-                        info: decl_info
-                    }),
-                    value: Box::new(Node::Block {
-                        is_body: false,
-                        depth: None,
-                        statements: Vec::from([Box::new(Node::ReturnExpr {
-                            node: Box::new(Node::IntLit {
-                                v: 5,
-                                size: 8,
-                                info: integer_info
-                            }),
-                            info: return_info
-                        })]),
-                        kind: "LocalScope",
-                        info: block_info
-                    }),
-                    kind: "LetDecl",
-                    info: var_info
-                })]),
-                kind: "ProgramNode"
-            },
-            parser.parse()
-        );
-    }
-
-    #[test]
-    fn test_function() {
-        let line = "fn name[](){let x = {return 5;};}";
-        let mut parser = Parser::new(line);
-        let fn_info = NodeDetails::new(1, 1);
-        let decl_info = NodeDetails::new(1, 17);
-        let var_info = NodeDetails::new(1, 13);
-        let block_info = NodeDetails::new(1, 22);
-        let integer_info = NodeDetails::new(1, 29);
-        let return_info = NodeDetails::new(1, 22);
-        let info = NodeDetails::new(0, 0);
-        assert_eq!(
-            Node::Program {
-                statements: Vec::from([Box::new(Node::FunctionDecl {
-                    decl: Box::new(Node::Decl {
-                        ident: "name",
-                        ty: Some(DataType::Dynamic),
-                        kind: "",
-                        info
-                    }),
-                    params: vec![],
-                    args: vec![],
-                    block: Box::new(Node::Block {
-                        statements: vec![Box::new(Node::LetDecl {
+                let var_info = NodeDetails::new(1, 1);
+                let decl_info = NodeDetails::new(1, 5);
+                let integer_info = NodeDetails::new(1, 9);
+                assert_eq!(
+                    Node::Program {
+                        statements: Vec::from([Box::new(Node::LetDecl {
                             r: None,
                             decl: Box::new(Node::Decl {
                                 ident: "x",
-                                ty: Some(DataType::Dynamic),
+                                ty: Some(ty.clone()),
                                 kind: "Decl",
                                 info: decl_info
                             }),
-                            value: Box::new(Node::Block {
-                                is_body: false,
-                                depth: None,
-                                statements: Vec::from([Box::new(Node::ReturnExpr {
-                                    node: Box::new(Node::IntLit {
-                                        v: 5,
-                                        size: 8,
-                                        info: integer_info
-                                    }),
-                                    info: return_info
-                                })]),
-                                kind: "LocalScope",
-                                info: block_info
+                            value: Box::new(Node::IntLit {
+                                v: 5,
+                                size: 8,
+                                info: integer_info
                             }),
                             kind: "LetDecl",
                             info: var_info
-                        })],
-                        kind: "",
-                        info,
-                        depth: Some(1),
-                        is_body: true
-                    }),
-                    kind: "",
-                    info
-                }),]),
-                kind: "ProgramNode"
-            },
-            parser.parse()
-        );
-    }
-    #[test]
-    fn test_function2() {
-        let line = "fn name(){let x = {return 5;};}";
-        let mut parser = Parser::new(line);
-        let info = NodeDetails::new(0, 0);
-        assert_eq!(
-            Node::Program {
-                statements: Vec::from([Box::new(Node::FunctionDecl {
-                    decl: Box::new(Node::Decl {
-                        ident: "name",
-                        ty: Some(DataType::Dynamic),
-                        kind: "",
-                        info
-                    }),
-                    params: vec![],
-                    args: vec![],
-                    block: Box::new(Node::Block {
-                        statements: vec![Box::new(Node::LetDecl {
-                            r: None,
-                            decl: Box::new(Node::Decl {
-                                ident: "x",
-                                ty: Some(DataType::Dynamic),
-                                kind: "Decl",
-                                info
-                            }),
-                            value: Box::new(Node::Block {
-                                is_body: false,
-                                depth: None,
-                                statements: Vec::from([Box::new(Node::ReturnExpr {
-                                    node: Box::new(Node::IntLit {
-                                        v: 5,
-                                        size: 8,
-                                        info
-                                    }),
-                                    info
-                                })]),
-                                kind: "LocalScope",
-                                info
-                            }),
-                            kind: "LetDecl",
-                            info
-                        })],
-                        kind: "",
-                        info,
-                        depth: Some(1),
-                        is_body: true
-                    }),
-                    kind: "",
-                    info
-                }),]),
-                kind: "ProgramNode"
-            },
-            parser.parse()
-        );
-    }
-    #[test]
-    #[should_panic]
-    fn test_function3() {
-        let line = "fn name{let x = {return 5;};}";
-        let mut parser = Parser::new(line);
-        let info = NodeDetails::new(0, 0);
-        assert_eq!(
-            Node::Program {
-                statements: Vec::from([Box::new(Node::FunctionDecl {
-                    decl: Box::new(Node::Decl {
-                        ident: "name",
-                        ty: Some(DataType::Dynamic),
-                        kind: "",
-                        info
-                    }),
-                    params: vec![],
-                    args: vec![],
-                    block: Box::new(Node::Block {
-                        statements: vec![Box::new(Node::LetDecl {
-                            r: None,
-                            decl: Box::new(Node::Decl {
-                                ident: "x",
-                                ty: Some(DataType::Dynamic),
-                                kind: "Decl",
-                                info
-                            }),
-                            value: Box::new(Node::Block {
-                                is_body: false,
-                                depth: None,
-                                statements: Vec::from([Box::new(Node::ReturnExpr {
-                                    node: Box::new(Node::IntLit {
-                                        v: 5,
-                                        size: 8,
-                                        info
-                                    }),
-                                    info
-                                })]),
-                                kind: "LocalScope",
-                                info
-                            }),
-                            kind: "LetDecl",
-                            info
-                        })],
-                        kind: "",
-                        info,
-                        depth: Some(1),
-                        is_body: true
-                    }),
-                    kind: "",
-                    info
-                }),]),
-                kind: "ProgramNode"
-            },
-            parser.parse()
-        );
-    }
+                        })]),
+                        kind: "ProgramNode"
+                    },
+                    parser.parse()
+                );
+            }
+        }
 
-    #[test]
-    fn test_function_call() {
-        let line = "name()";
-        let mut parser = Parser::new(line);
-        let info = NodeDetails::new(0, 0);
-        assert_eq!(
-            Node::Program {
-                statements: Vec::from([Box::new(Node::CallExpr {
-                    ident: Box::new(Node::IdentExpr {
-                        name: "name",
+        #[test]
+        fn test_let_block() {
+            let line = "let x = {5};";
+            let mut parser = Parser::new(line);
+            let decl_info = NodeDetails::new(1, 5);
+            let var_info = NodeDetails::new(1, 1);
+            let block_info = NodeDetails::new(1, 10);
+            let integer_info = NodeDetails::new(1, 10);
+            let return_info = NodeDetails::new(1, 11);
+            assert_eq!(
+                Node::Program {
+                    statements: Vec::from([Box::new(Node::LetDecl {
                         r: None,
-                        ty: None,
-                        info
-                    }),
-                    params: vec![],
-                    args: vec![],
-                    kind: "",
-                    info,
-                    r: None,
-                }),]),
-                kind: "ProgramNode"
-            },
-            parser.parse()
-        );
+                        decl: Box::new(Node::Decl {
+                            ident: "x",
+                            ty: Some(DataType::Dynamic),
+                            kind: "Decl",
+                            info: decl_info
+                        }),
+                        value: Box::new(Node::Block {
+                            is_body: false,
+                            depth: None,
+                            statements: Vec::from([Box::new(Node::ReturnExpr {
+                                node: Box::new(Node::IntLit {
+                                    v: 5,
+                                    size: 8,
+                                    info: integer_info
+                                }),
+                                info: return_info
+                            })]),
+                            kind: "LocalScope",
+                            info: block_info
+                        }),
+                        kind: "LetDecl",
+                        info: var_info
+                    })]),
+                    kind: "ProgramNode"
+                },
+                parser.parse()
+            );
+        }
+        #[test]
+
+        fn test_let_block_with_return() {
+            let line = "let x = {return 5;};";
+            let mut parser = Parser::new(line);
+            let decl_info = NodeDetails::new(1, 5);
+            let var_info = NodeDetails::new(1, 1);
+            let block_info = NodeDetails::new(1, 10);
+            let integer_info = NodeDetails::new(1, 17);
+            let return_info = NodeDetails::new(1, 10);
+            assert_eq!(
+                Node::Program {
+                    statements: Vec::from([Box::new(Node::LetDecl {
+                        r: None,
+                        decl: Box::new(Node::Decl {
+                            ident: "x",
+                            ty: Some(DataType::Dynamic),
+                            kind: "Decl",
+                            info: decl_info
+                        }),
+                        value: Box::new(Node::Block {
+                            is_body: false,
+                            depth: None,
+                            statements: Vec::from([Box::new(Node::ReturnExpr {
+                                node: Box::new(Node::IntLit {
+                                    v: 5,
+                                    size: 8,
+                                    info: integer_info
+                                }),
+                                info: return_info
+                            })]),
+                            kind: "LocalScope",
+                            info: block_info
+                        }),
+                        kind: "LetDecl",
+                        info: var_info
+                    })]),
+                    kind: "ProgramNode"
+                },
+                parser.parse()
+            );
+        }
     }
-    #[test]
-    fn test_function_call2() {
-        let line = "name[]()";
-        let mut parser = Parser::new(line);
-        let info = NodeDetails::new(0, 0);
-        assert_eq!(
-            Node::Program {
-                statements: Vec::from([Box::new(Node::CallExpr {
-                    ident: Box::new(Node::IdentExpr {
-                        name: "name",
-                        r: None,
-                        ty: None,
-                        info
-                    }),
-                    params: vec![],
-                    args: vec![],
-                    kind: "",
-                    info,
-                    r: None,
-                }),]),
-                kind: "ProgramNode"
-            },
-            parser.parse()
-        );
+    mod operations {
+        use std::fmt::format;
+
+        use super::*;
+        const BINARY_OPS: &[(&str, Operator)] = &[
+            ("+", Operator::Add),
+            ("-", Operator::Sub),
+            ("*", Operator::Mul),
+            ("**", Operator::Power),
+            ("/", Operator::Div),
+            ("&&", Operator::And),
+            ("||", Operator::Or),
+            ("&", Operator::BinaryAnd),
+            ("^", Operator::BinaryXor),
+            ("%", Operator::Mod),
+            ("==", Operator::Equality),
+            ("!=", Operator::NotEquality),
+            ("<", Operator::LesserThan),
+            ("<=", Operator::LesserThanOrEqual),
+            (">", Operator::GreaterThan),
+            (">=", Operator::GreaterThanOrEqual),
+        ];
+        const UNARY_OPS: &[(&str, Operator)] = &[
+            ("!", Operator::Not),
+            ("++", Operator::PreIncrement),
+            ("++", Operator::PostIncrement),
+            ("--", Operator::PreDecrement),
+            ("--", Operator::PostDecrement),
+        ];
+        const ASSIGN_OPS: &[(&str, Operator)] = &[
+            ("<-", Operator::AssignNew),
+            ("+=", Operator::AssignPlus),
+            ("-=", Operator::AssignMinus),
+            ("*=", Operator::AssignMultiply),
+            ("**=", Operator::AssignPower),
+            ("/=", Operator::AssignDivide),
+            ("%=", Operator::AssignModolus),
+            ("&&=", Operator::AssignAnd),
+            ("||=", Operator::AssignOr),
+            ("&=", Operator::AssignBinaryAnd),
+            ("|=", Operator::AssignBinaryOr),
+            ("^=", Operator::AssignBinaryXor),
+        ];
+        #[test]
+        fn test_binary_expressions_without_ident() {
+            for &(sym, ref op) in BINARY_OPS {
+                println!("TEST ({})", sym);
+                let line = format!("5 {} 4", sym);
+                let mut parser = Parser::new(&line);
+
+                let info = NodeDetails::new(0, 0);
+                assert_eq!(
+                    Node::Program {
+                        statements: Vec::from([Box::new(Node::BinaryExpr {
+                            op: op.clone(),
+                            left: Box::new(Node::IntLit {
+                                v: 5,
+                                size: 8,
+                                info
+                            }),
+                            right: Box::new(Node::IntLit {
+                                v: 4,
+                                size: 8,
+                                info
+                            }),
+                            ty: None,
+                            kind: "",
+                            info
+                        })]),
+                        kind: ""
+                    },
+                    parser.parse()
+                );
+            }
+        }
+        #[test]
+        fn test_binary_expressions() {
+            for &(sym, ref op) in BINARY_OPS {
+                let line = format!(
+                    "let a = 4;
+let b = 10;
+a {} b;",
+                    sym
+                );
+                let mut parser = Parser::new(&line);
+
+                let info = NodeDetails::new(0, 0);
+                assert_eq!(
+                    Node::Program {
+                        statements: Vec::from([
+                            Box::new(Node::LetDecl {
+                                r: None,
+                                decl: Box::new(Node::Decl {
+                                    ident: "a",
+                                    ty: Some(DataType::Dynamic),
+                                    kind: "",
+                                    info
+                                }),
+                                value: Box::new(Node::IntLit {
+                                    v: 4,
+                                    size: 8,
+                                    info
+                                }),
+                                kind: "",
+                                info
+                            }),
+                            Box::new(Node::LetDecl {
+                                r: None,
+                                decl: Box::new(Node::Decl {
+                                    ident: "b",
+                                    ty: Some(DataType::Dynamic),
+                                    kind: "",
+                                    info
+                                }),
+                                value: Box::new(Node::IntLit {
+                                    v: 10,
+                                    size: 8,
+                                    info
+                                }),
+                                kind: "",
+                                info
+                            }),
+                            Box::new(Node::BinaryExpr {
+                                op: op.clone(),
+                                left: Box::new(Node::IdentExpr {
+                                    name: "a",
+                                    r: None,
+                                    ty: None,
+                                    info
+                                }),
+                                right: Box::new(Node::IdentExpr {
+                                    name: "b",
+                                    r: None,
+                                    ty: None,
+                                    info
+                                }),
+                                ty: None,
+                                kind: "",
+                                info
+                            })
+                        ]),
+                        kind: ""
+                    },
+                    parser.parse()
+                );
+            }
+        }
+        #[test]
+        fn test_unary_expresssions() {
+            for &(sym, ref op) in UNARY_OPS {
+                let pre = {
+                    if op == &Operator::PostIncrement || op == &Operator::PostDecrement {
+                        false
+                    } else {
+                        true
+                    }
+                };
+                let line = format!(
+                    "let a = 4;
+{}",
+                    if pre {
+                        format!("{}a", sym)
+                    } else {
+                        format!("a{}", sym)
+                    }
+                );
+                let mut parser = Parser::new(&line);
+
+                let info = NodeDetails::new(0, 0);
+                assert_eq!(
+                    Node::Program {
+                        statements: Vec::from([
+                            Box::new(Node::LetDecl {
+                                r: None,
+                                decl: Box::new(Node::Decl {
+                                    ident: "a",
+                                    ty: Some(DataType::Dynamic),
+                                    kind: "",
+                                    info
+                                }),
+                                value: Box::new(Node::IntLit {
+                                    v: 4,
+                                    size: 8,
+                                    info
+                                }),
+                                kind: "",
+                                info
+                            }),
+                            Box::new(Node::UnaryExpr {
+                                op: op.clone(),
+                                node: Box::new(Node::IdentExpr {
+                                    name: "a",
+                                    r: None,
+                                    ty: None,
+                                    info
+                                }),
+                                ty: None,
+                                kind: "",
+                                info
+                            })
+                        ]),
+                        kind: ""
+                    },
+                    parser.parse()
+                );
+            }
+        }
+        #[test]
+        fn test_assign_expressions() {
+            for &(sym, ref op) in ASSIGN_OPS {
+                let line = format!(
+                    "let a = 4;
+a {} 4;",
+                    sym
+                );
+                let mut parser = Parser::new(&line);
+
+                let info = NodeDetails::new(0, 0);
+                assert_eq!(
+                    Node::Program {
+                        statements: Vec::from([
+                            Box::new(Node::LetDecl {
+                                r: None,
+                                decl: Box::new(Node::Decl {
+                                    ident: "a",
+                                    ty: Some(DataType::Dynamic),
+                                    kind: "",
+                                    info
+                                }),
+                                value: Box::new(Node::IntLit {
+                                    v: 4,
+                                    size: 8,
+                                    info
+                                }),
+                                kind: "",
+                                info
+                            }),
+                            Box::new(Node::AssignStmt {
+                                ident: "a",
+                                op: op.clone(),
+                                value: Box::new(Node::IntLit {
+                                    v: 4,
+                                    size: 8,
+                                    info
+                                }),
+                                info,
+                                r: None
+                            })
+                        ]),
+                        kind: ""
+                    },
+                    parser.parse()
+                );
+            }
+        }
     }
-    #[test]
-    #[should_panic]
-    fn test_function_call3() {
-        let line = "name[)";
-        let mut parser = Parser::new(line);
-        let info = NodeDetails::new(0, 0);
-        assert_eq!(
-            Node::Program {
-                statements: Vec::from([Box::new(Node::CallExpr {
-                    ident: Box::new(Node::IdentExpr {
-                        name: "name",
-                        r: None,
-                        ty: None,
+    mod functions {
+        use super::*;
+
+        #[test]
+        fn test_function() {
+            let line = "fn name[](){let x = {return 5;};}";
+            let mut parser = Parser::new(line);
+            let decl_info = NodeDetails::new(1, 17);
+            let var_info = NodeDetails::new(1, 13);
+            let block_info = NodeDetails::new(1, 22);
+            let integer_info = NodeDetails::new(1, 29);
+            let return_info = NodeDetails::new(1, 22);
+            let info = NodeDetails::new(0, 0);
+            assert_eq!(
+                Node::Program {
+                    statements: Vec::from([Box::new(Node::FunctionDecl {
+                        decl: Box::new(Node::Decl {
+                            ident: "name",
+                            ty: Some(DataType::Dynamic),
+                            kind: "",
+                            info
+                        }),
+                        params: vec![],
+                        args: vec![],
+                        block: Box::new(Node::Block {
+                            statements: vec![Box::new(Node::LetDecl {
+                                r: None,
+                                decl: Box::new(Node::Decl {
+                                    ident: "x",
+                                    ty: Some(DataType::Dynamic),
+                                    kind: "Decl",
+                                    info: decl_info
+                                }),
+                                value: Box::new(Node::Block {
+                                    is_body: false,
+                                    depth: None,
+                                    statements: Vec::from([Box::new(Node::ReturnExpr {
+                                        node: Box::new(Node::IntLit {
+                                            v: 5,
+                                            size: 8,
+                                            info: integer_info
+                                        }),
+                                        info: return_info
+                                    })]),
+                                    kind: "LocalScope",
+                                    info: block_info
+                                }),
+                                kind: "LetDecl",
+                                info: var_info
+                            })],
+                            kind: "",
+                            info,
+                            depth: Some(1),
+                            is_body: true
+                        }),
+                        kind: "",
                         info
-                    }),
-                    params: vec![],
-                    args: vec![],
-                    kind: "",
-                    info,
-                    r: None,
-                }),]),
-                kind: "ProgramNode"
-            },
-            parser.parse()
-        );
-    }
-    #[test]
-    fn test_function_call4() {
-        let line = "name[1, 2, 3](1, 2, 3)";
-        let mut parser = Parser::new(line);
-        let info = NodeDetails::new(0, 0);
-        assert_eq!(
-            Node::Program {
-                statements: Vec::from([Box::new(Node::CallExpr {
-                    ident: Box::new(Node::IdentExpr {
-                        name: "name",
-                        r: None,
-                        ty: None,
+                    }),]),
+                    kind: "ProgramNode"
+                },
+                parser.parse()
+            );
+        }
+        #[test]
+        fn test_function2() {
+            let line = "fn name(){let x = {return 5;};}";
+            let mut parser = Parser::new(line);
+            let info = NodeDetails::new(0, 0);
+            assert_eq!(
+                Node::Program {
+                    statements: Vec::from([Box::new(Node::FunctionDecl {
+                        decl: Box::new(Node::Decl {
+                            ident: "name",
+                            ty: Some(DataType::Dynamic),
+                            kind: "",
+                            info
+                        }),
+                        params: vec![],
+                        args: vec![],
+                        block: Box::new(Node::Block {
+                            statements: vec![Box::new(Node::LetDecl {
+                                r: None,
+                                decl: Box::new(Node::Decl {
+                                    ident: "x",
+                                    ty: Some(DataType::Dynamic),
+                                    kind: "Decl",
+                                    info
+                                }),
+                                value: Box::new(Node::Block {
+                                    is_body: false,
+                                    depth: None,
+                                    statements: Vec::from([Box::new(Node::ReturnExpr {
+                                        node: Box::new(Node::IntLit {
+                                            v: 5,
+                                            size: 8,
+                                            info
+                                        }),
+                                        info
+                                    })]),
+                                    kind: "LocalScope",
+                                    info
+                                }),
+                                kind: "LetDecl",
+                                info
+                            })],
+                            kind: "",
+                            info,
+                            depth: Some(1),
+                            is_body: true
+                        }),
+                        kind: "",
                         info
-                    }),
-                    params: vec![
-                        Box::new(Node::IntLit {
-                            v: 1,
-                            size: 8,
+                    }),]),
+                    kind: "ProgramNode"
+                },
+                parser.parse()
+            );
+        }
+        #[test]
+        #[should_panic]
+        fn test_function3() {
+            let line = "fn name{let x = {return 5;};}";
+            let mut parser = Parser::new(line);
+            let info = NodeDetails::new(0, 0);
+            assert_eq!(
+                Node::Program {
+                    statements: Vec::from([Box::new(Node::FunctionDecl {
+                        decl: Box::new(Node::Decl {
+                            ident: "name",
+                            ty: Some(DataType::Dynamic),
+                            kind: "",
                             info
                         }),
-                        Box::new(Node::IntLit {
-                            v: 2,
-                            size: 8,
+                        params: vec![],
+                        args: vec![],
+                        block: Box::new(Node::Block {
+                            statements: vec![Box::new(Node::LetDecl {
+                                r: None,
+                                decl: Box::new(Node::Decl {
+                                    ident: "x",
+                                    ty: Some(DataType::Dynamic),
+                                    kind: "Decl",
+                                    info
+                                }),
+                                value: Box::new(Node::Block {
+                                    is_body: false,
+                                    depth: None,
+                                    statements: Vec::from([Box::new(Node::ReturnExpr {
+                                        node: Box::new(Node::IntLit {
+                                            v: 5,
+                                            size: 8,
+                                            info
+                                        }),
+                                        info
+                                    })]),
+                                    kind: "LocalScope",
+                                    info
+                                }),
+                                kind: "LetDecl",
+                                info
+                            })],
+                            kind: "",
+                            info,
+                            depth: Some(1),
+                            is_body: true
+                        }),
+                        kind: "",
+                        info
+                    }),]),
+                    kind: "ProgramNode"
+                },
+                parser.parse()
+            );
+        }
+
+        #[test]
+        fn test_function_call() {
+            let line = "name()";
+            let mut parser = Parser::new(line);
+            let info = NodeDetails::new(0, 0);
+            assert_eq!(
+                Node::Program {
+                    statements: Vec::from([Box::new(Node::CallExpr {
+                        ident: Box::new(Node::IdentExpr {
+                            name: "name",
+                            r: None,
+                            ty: None,
                             info
                         }),
-                        Box::new(Node::IntLit {
-                            v: 3,
-                            size: 8,
+                        params: vec![],
+                        args: vec![],
+                        kind: "",
+                        info,
+                        r: None,
+                    }),]),
+                    kind: "ProgramNode"
+                },
+                parser.parse()
+            );
+        }
+        #[test]
+        fn test_function_call2() {
+            let line = "name[]()";
+            let mut parser = Parser::new(line);
+            let info = NodeDetails::new(0, 0);
+            assert_eq!(
+                Node::Program {
+                    statements: Vec::from([Box::new(Node::CallExpr {
+                        ident: Box::new(Node::IdentExpr {
+                            name: "name",
+                            r: None,
+                            ty: None,
                             info
                         }),
-                    ],
-                    args: vec![
-                        Box::new(Node::IntLit {
-                            v: 1,
-                            size: 8,
+                        params: vec![],
+                        args: vec![],
+                        kind: "",
+                        info,
+                        r: None,
+                    }),]),
+                    kind: "ProgramNode"
+                },
+                parser.parse()
+            );
+        }
+        #[test]
+        #[should_panic]
+        fn test_function_call3() {
+            let line = "name[)";
+            let mut parser = Parser::new(line);
+            let info = NodeDetails::new(0, 0);
+            assert_eq!(
+                Node::Program {
+                    statements: Vec::from([Box::new(Node::CallExpr {
+                        ident: Box::new(Node::IdentExpr {
+                            name: "name",
+                            r: None,
+                            ty: None,
                             info
                         }),
-                        Box::new(Node::IntLit {
-                            v: 2,
-                            size: 8,
+                        params: vec![],
+                        args: vec![],
+                        kind: "",
+                        info,
+                        r: None,
+                    }),]),
+                    kind: "ProgramNode"
+                },
+                parser.parse()
+            );
+        }
+        #[test]
+        fn test_function_call4() {
+            let line = "name[1, 2, 3](1, 2, 3)";
+            let mut parser = Parser::new(line);
+            let info = NodeDetails::new(0, 0);
+            assert_eq!(
+                Node::Program {
+                    statements: Vec::from([Box::new(Node::CallExpr {
+                        ident: Box::new(Node::IdentExpr {
+                            name: "name",
+                            r: None,
+                            ty: None,
                             info
                         }),
-                        Box::new(Node::IntLit {
-                            v: 3,
-                            size: 8,
-                            info
-                        }),
-                    ],
-                    kind: "",
-                    info,
-                    r: None,
-                }),]),
-                kind: "ProgramNode"
-            },
-            parser.parse()
-        );
+                        params: vec![
+                            Box::new(Node::IntLit {
+                                v: 1,
+                                size: 8,
+                                info
+                            }),
+                            Box::new(Node::IntLit {
+                                v: 2,
+                                size: 8,
+                                info
+                            }),
+                            Box::new(Node::IntLit {
+                                v: 3,
+                                size: 8,
+                                info
+                            }),
+                        ],
+                        args: vec![
+                            Box::new(Node::IntLit {
+                                v: 1,
+                                size: 8,
+                                info
+                            }),
+                            Box::new(Node::IntLit {
+                                v: 2,
+                                size: 8,
+                                info
+                            }),
+                            Box::new(Node::IntLit {
+                                v: 3,
+                                size: 8,
+                                info
+                            }),
+                        ],
+                        kind: "",
+                        info,
+                        r: None,
+                    }),]),
+                    kind: "ProgramNode"
+                },
+                parser.parse()
+            );
+        }
     }
 }

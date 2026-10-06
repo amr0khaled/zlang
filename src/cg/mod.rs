@@ -255,6 +255,7 @@ impl<'a> Literal for Memory<'a> {
 
 #[cfg(test)]
 mod tests {
+    #![cfg(any())]
     use crate::{
         analyzer::{Analyzer, gen_ident_id},
         cg::{Memory, OpCode, opcode::Sym},

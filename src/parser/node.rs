@@ -49,7 +49,7 @@ impl DataType {
             TokenType::I64 => Self::Signed64,
             TokenType::F32 => Self::Float32,
             TokenType::F64 => Self::Float64,
-            TokenType::BoolLiteral => Self::Boolean,
+            TokenType::Bool => Self::Boolean,
             _ => panic!("Syntax error: Expected datatype, got {:?}", token),
         }
     }

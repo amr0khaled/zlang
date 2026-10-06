@@ -135,20 +135,20 @@ impl<'a> Tokenizer<'a> {
                     Some(self.tokenize(TokenType::AssignNew, 2))
                 } else if peeked == '=' {
                     self.advance_by(2);
-                    Some(self.tokenize(TokenType::GreaterThanOrEqual, 2))
+                    Some(self.tokenize(TokenType::LesserThanOrEqual, 2))
                 } else {
                     self.advance_by(1);
-                    Some(self.tokenize(TokenType::GreaterThan, 1))
+                    Some(self.tokenize(TokenType::LesserThan, 1))
                 }
             }
             '>' => {
                 let peeked = self.peek();
                 if peeked == '=' {
                     self.advance_by(2);
-                    Some(self.tokenize(TokenType::LesserThanOrEqual, 2))
+                    Some(self.tokenize(TokenType::GreaterThanOrEqual, 2))
                 } else {
                     self.advance_by(1);
-                    Some(self.tokenize(TokenType::LesserThan, 1))
+                    Some(self.tokenize(TokenType::GreaterThan, 1))
                 }
             }
             '&' => {
