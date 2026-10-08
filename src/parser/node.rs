@@ -71,10 +71,10 @@ impl DataType {
     }
     pub fn get_size(&self) -> usize {
         match self {
-            DataType::Unsigned8 | DataType::Signed8 => 8,
-            DataType::Unsigned16 | DataType::Signed16 => 16,
-            DataType::Unsigned32 | DataType::Signed32 | DataType::Float32 => 32,
-            DataType::Unsigned64 | DataType::Signed64 | DataType::Float64 => 64,
+            DataType::Unsigned8 | DataType::Signed8 => 1,
+            DataType::Unsigned16 | DataType::Signed16 => 2,
+            DataType::Unsigned32 | DataType::Signed32 | DataType::Float32 => 4,
+            DataType::Unsigned64 | DataType::Signed64 | DataType::Float64 => 8,
             DataType::Boolean => 1,
             DataType::Dynamic => 0,
             DataType::Void => 0,
@@ -95,6 +95,8 @@ impl DataType {
             DataType::Signed16 => true,
             DataType::Signed32 => true,
             DataType::Signed64 => true,
+            DataType::Float32 => true,
+            DataType::Float64 => true,
             _ => false,
         }
     }
@@ -107,11 +109,6 @@ pub enum Node<'a> {
     Ref(u32, usize),
     DataType(DataType),
     // ===Literal===
-    UintLit {
-        v: u64,
-        size: usize,
-        info: NodeDetails,
-    },
     IntLit {
         v: i64,
         size: usize,
@@ -220,18 +217,6 @@ impl<'a> PartialEq for Node<'a> {
         match (self, other) {
             (Self::Ref(l0, l1), Self::Ref(r0, r1)) => l0 == r0 && l1 == r1,
             (Self::DataType(l0), Self::DataType(r0)) => l0 == r0,
-            (
-                Self::UintLit {
-                    v: l_v,
-                    size: l_size,
-                    ..
-                },
-                Self::UintLit {
-                    v: r_v,
-                    size: r_size,
-                    ..
-                },
-            ) => l_v == r_v && l_size == r_size,
             (
                 Self::IntLit {
                     v: l_v,

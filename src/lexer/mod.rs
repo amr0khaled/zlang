@@ -312,6 +312,7 @@ impl<'a> Tokenizer<'a> {
             "true" => self.tokenize(TokenType::BoolLiteral, len),
             "false" => self.tokenize(TokenType::BoolLiteral, len),
             "return" => self.tokenize(TokenType::Return, len),
+            "as" => self.tokenize(TokenType::As, len),
             // Data types
             "u8" => self.tokenize(TokenType::U8, len),
             "u16" => self.tokenize(TokenType::U16, len),

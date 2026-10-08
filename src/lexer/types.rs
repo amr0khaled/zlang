@@ -58,6 +58,7 @@ pub enum TokenType : u64 {
     Const,
     Function,
     Return,
+    As,
     // Data types
     U8,
     U16,

@@ -128,22 +128,39 @@ impl<'a> Parser<'a> {
                 let v = token.pointer.parse::<i64>().unwrap_or_else(|_| {
                     panic!("Line {}: Invalid integer '{}'", token.line, token.pointer)
                 });
-                Node::IntLit { v, size: 8, info }
+                let mut ty = DataType::Signed32;
+                let mut size: usize = 4;
+                if self.peek().kind == TokenType::As {
+                    ty = self.parse_type();
+                    println!("ty: {:#?}", ty);
+                    size = ty.get_size();
+                    println!("SSIIZ {}", size);
+                }
+                println!("ty after: {:#?}", ty);
+                Node::IntLit { v, size, info }
             }
             TokenType::FloatLiteral => {
                 let v = token.pointer.parse::<f64>().unwrap_or_else(|_| {
                     panic!("Line {}: Invalid integer '{}'", token.line, token.pointer)
                 });
-                Node::FloatLit { v, size: 8, info }
+                let mut ty = DataType::Signed32;
+                let mut size: usize = 4;
+                if self.peek().kind == TokenType::As {
+                    ty = self.parse_type();
+                    println!("ty: {:#?}", ty);
+                    size = ty.get_size();
+                    println!("SSIIZ {}", size);
+                }
+                Node::FloatLit { v, size, info }
             }
             TokenType::F32 | TokenType::F64 => {
                 let ty = DataType::from_token(token.kind);
-                let (v, size) = match ty.get_size() {
-                    32 => (token.pointer.parse::<f32>().unwrap() as f64, 4),
-                    64 => (token.pointer.parse::<f64>().unwrap(), 8),
-                    _ => panic!("Line {}: Invalid Float '{}'", token.line, token.pointer),
-                };
-                Node::FloatLit { v, size, info }
+                // let (v, size) = match ty.get_size() {
+                //     32 => (token.pointer.parse::<f32>().unwrap() as f64, 4),
+                //     64 => (token.pointer.parse::<f64>().unwrap(), 8),
+                //     _ => panic!("Line {}: Invalid Float '{}'", token.line, token.pointer),
+                // };
+                Node::DataType(ty)
             }
             TokenType::BoolLiteral => {
                 let v = token.pointer.parse::<bool>().unwrap();
@@ -344,10 +361,25 @@ impl<'a> Parser<'a> {
             info,
         }
     }
+    fn parse_type_from_value(&self, value: &Node<'a>) -> DataType {
+        match value {
+            Node::IntLit { size: 1, .. } => DataType::Signed8,
+            Node::IntLit { size: 2, .. } => DataType::Signed16,
+            Node::IntLit { size: 4, .. } => DataType::Signed32,
+            Node::IntLit { size: 8, .. } => DataType::Signed64,
+
+            Node::FloatLit { size: 4, .. } => DataType::Float32,
+            Node::FloatLit { size: 8, .. } => DataType::Float64,
+
+            Node::BooleanLit { .. } => DataType::Boolean,
+            Node::Dynamic => DataType::Dynamic,
+            _ => DataType::Dynamic,
+        }
+    }
     fn parse_let(&mut self, constant: bool) -> Node<'a> {
         println!("var ");
         let keyword = self.next();
-        let decl = Box::new(self.parse_decl(false));
+        let mut decl = Box::new(self.parse_decl(false));
         let (peek_pointer, peek_kind, peek_line) = {
             let peek = self.peek();
             (peek.pointer, peek.kind, peek.line)
@@ -374,6 +406,12 @@ impl<'a> Parser<'a> {
         };
         self.eol();
         let info = Node::info(&keyword);
+        let _ty = self.parse_type_from_value(&value);
+        if let Node::Decl { ty, .. } = &mut (*decl) {
+            if ty.unwrap() == DataType::Dynamic {
+                *ty = Some(_ty);
+            }
+        }
         if constant {
             Node::ConstDecl {
                 decl,
@@ -395,8 +433,10 @@ impl<'a> Parser<'a> {
 
     fn parse_type(&mut self) -> DataType {
         let mut ty: DataType = DataType::Dynamic;
-        if self.peek().kind == TokenType::Colon {
-            expect!(self, TokenType::Colon);
+        if self
+            .expect_one_of(&[TokenType::Colon, TokenType::As])
+            .is_some()
+        {
             ty = match self.peek() {
                 t if is_datatype(t.kind) => DataType::from_token(self.next().kind),
                 t => panic!(
@@ -731,13 +771,13 @@ mod tests {
                         r: None,
                         decl: Box::new(Node::Decl {
                             ident: "x",
-                            ty: Some(DataType::Dynamic),
+                            ty: Some(DataType::Signed32),
                             kind: "Decl",
                             info: decl_info
                         }),
                         value: Box::new(Node::IntLit {
                             v: 5,
-                            size: 8,
+                            size: 4,
                             info: integer_info
                         }),
                         kind: "LetDecl",
@@ -767,10 +807,77 @@ mod tests {
                                 kind: "Decl",
                                 info: decl_info
                             }),
-                            value: Box::new(Node::IntLit {
-                                v: 5,
-                                size: 8,
-                                info: integer_info
+                            value: Box::new(match ty {
+                                DataType::Unsigned8
+                                | DataType::Unsigned16
+                                | DataType::Unsigned32
+                                | DataType::Unsigned64
+                                | DataType::Signed8
+                                | DataType::Signed16
+                                | DataType::Signed32
+                                | DataType::Signed64 => Node::IntLit {
+                                    v: 5,
+                                    size: 4,
+                                    info: integer_info
+                                },
+                                DataType::Float32 | DataType::Float64 => Node::FloatLit {
+                                    v: 5 as f64,
+                                    size: 4,
+                                    info: integer_info
+                                },
+                                _ => {
+                                    Node::Empty
+                                }
+                            }),
+                            kind: "LetDecl",
+                            info: var_info
+                        })]),
+                        kind: "ProgramNode"
+                    },
+                    parser.parse()
+                );
+            }
+        }
+        #[test]
+        fn test_let_as_type() {
+            for &(sym, ref ty) in PRIMITIVE_TYPES {
+                let line = format!("let x = 5 as {};", sym);
+                let mut parser = Parser::new(&line);
+
+                let var_info = NodeDetails::new(1, 1);
+                let decl_info = NodeDetails::new(1, 5);
+                let integer_info = NodeDetails::new(1, 9);
+                assert_eq!(
+                    Node::Program {
+                        statements: Vec::from([Box::new(Node::LetDecl {
+                            r: None,
+                            decl: Box::new(Node::Decl {
+                                ident: "x",
+                                ty: Some(ty.clone()),
+                                kind: "Decl",
+                                info: decl_info
+                            }),
+                            value: Box::new(match ty {
+                                DataType::Unsigned8
+                                | DataType::Unsigned16
+                                | DataType::Unsigned32
+                                | DataType::Unsigned64
+                                | DataType::Signed8
+                                | DataType::Signed16
+                                | DataType::Signed32
+                                | DataType::Signed64 => Node::IntLit {
+                                    v: 5,
+                                    size: ty.get_size(),
+                                    info: integer_info
+                                },
+                                DataType::Float32 | DataType::Float64 => Node::FloatLit {
+                                    v: 5 as f64,
+                                    size: ty.get_size(),
+                                    info: integer_info
+                                },
+                                _ => {
+                                    Node::Empty
+                                }
                             }),
                             kind: "LetDecl",
                             info: var_info
@@ -807,7 +914,7 @@ mod tests {
                             statements: Vec::from([Box::new(Node::ReturnExpr {
                                 node: Box::new(Node::IntLit {
                                     v: 5,
-                                    size: 8,
+                                    size: 4,
                                     info: integer_info
                                 }),
                                 info: return_info
@@ -849,7 +956,7 @@ mod tests {
                             statements: Vec::from([Box::new(Node::ReturnExpr {
                                 node: Box::new(Node::IntLit {
                                     v: 5,
-                                    size: 8,
+                                    size: 4,
                                     info: integer_info
                                 }),
                                 info: return_info
@@ -923,12 +1030,12 @@ mod tests {
                             op: op.clone(),
                             left: Box::new(Node::IntLit {
                                 v: 5,
-                                size: 8,
+                                size: 4,
                                 info
                             }),
                             right: Box::new(Node::IntLit {
                                 v: 4,
-                                size: 8,
+                                size: 4,
                                 info
                             }),
                             ty: None,
@@ -960,13 +1067,13 @@ a {} b;",
                                 r: None,
                                 decl: Box::new(Node::Decl {
                                     ident: "a",
-                                    ty: Some(DataType::Dynamic),
+                                    ty: Some(DataType::Signed32),
                                     kind: "",
                                     info
                                 }),
                                 value: Box::new(Node::IntLit {
                                     v: 4,
-                                    size: 8,
+                                    size: 4,
                                     info
                                 }),
                                 kind: "",
@@ -976,13 +1083,13 @@ a {} b;",
                                 r: None,
                                 decl: Box::new(Node::Decl {
                                     ident: "b",
-                                    ty: Some(DataType::Dynamic),
+                                    ty: Some(DataType::Signed32),
                                     kind: "",
                                     info
                                 }),
                                 value: Box::new(Node::IntLit {
                                     v: 10,
-                                    size: 8,
+                                    size: 4,
                                     info
                                 }),
                                 kind: "",
@@ -1042,13 +1149,13 @@ a {} b;",
                                 r: None,
                                 decl: Box::new(Node::Decl {
                                     ident: "a",
-                                    ty: Some(DataType::Dynamic),
+                                    ty: Some(DataType::Signed32),
                                     kind: "",
                                     info
                                 }),
                                 value: Box::new(Node::IntLit {
                                     v: 4,
-                                    size: 8,
+                                    size: 4,
                                     info
                                 }),
                                 kind: "",
@@ -1091,13 +1198,13 @@ a {} 4;",
                                 r: None,
                                 decl: Box::new(Node::Decl {
                                     ident: "a",
-                                    ty: Some(DataType::Dynamic),
+                                    ty: Some(DataType::Signed32),
                                     kind: "",
                                     info
                                 }),
                                 value: Box::new(Node::IntLit {
                                     v: 4,
-                                    size: 8,
+                                    size: 4,
                                     info
                                 }),
                                 kind: "",
@@ -1108,7 +1215,7 @@ a {} 4;",
                                 op: op.clone(),
                                 value: Box::new(Node::IntLit {
                                     v: 4,
-                                    size: 8,
+                                    size: 4,
                                     info
                                 }),
                                 info,
@@ -1390,34 +1497,34 @@ a {} 4;",
                         params: vec![
                             Box::new(Node::IntLit {
                                 v: 1,
-                                size: 8,
+                                size: 4,
                                 info
                             }),
                             Box::new(Node::IntLit {
                                 v: 2,
-                                size: 8,
+                                size: 4,
                                 info
                             }),
                             Box::new(Node::IntLit {
                                 v: 3,
-                                size: 8,
+                                size: 4,
                                 info
                             }),
                         ],
                         args: vec![
                             Box::new(Node::IntLit {
                                 v: 1,
-                                size: 8,
+                                size: 4,
                                 info
                             }),
                             Box::new(Node::IntLit {
                                 v: 2,
-                                size: 8,
+                                size: 4,
                                 info
                             }),
                             Box::new(Node::IntLit {
                                 v: 3,
-                                size: 8,
+                                size: 4,
                                 info
                             }),
                         ],
