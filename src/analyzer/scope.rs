@@ -1,6 +1,12 @@
 use std::{cell::RefCell, mem, rc::Rc};
 
-use crate::analyzer::symbol::{Symbol, SymbolTable};
+use crate::{
+    analyzer::{
+        gen_ident_id,
+        symbol::{Symbol, SymbolTable, SymbolType},
+    },
+    parser::node::SymbolRef,
+};
 #[derive(Debug)]
 pub struct Scope<'a> {
     node: Rc<RefCell<SymbolTable<'a>>>,
@@ -16,6 +22,7 @@ impl<'a> Scope<'a> {
     pub fn base(node: Rc<RefCell<SymbolTable<'a>>>) -> Self {
         Self { node, parent: None }
     }
+    #[allow(dead_code)]
     pub fn new(node: Rc<RefCell<SymbolTable<'a>>>, parent: Box<Scope<'a>>) -> Self {
         Self {
             node,
@@ -24,9 +31,6 @@ impl<'a> Scope<'a> {
     }
     pub fn set_parent(&mut self, parent: Box<Scope<'a>>) {
         self.parent = Some(parent);
-    }
-    pub fn has_parent(&self) -> bool {
-        self.parent.is_some()
     }
     pub fn get(&self) -> Rc<RefCell<SymbolTable<'a>>> {
         self.node.clone()
@@ -76,6 +80,32 @@ impl<'a> ScopeList<'a> {
     pub fn get(&mut self) -> &mut Box<Scope<'a>> {
         &mut self.head
     }
+    pub fn declare(
+        &mut self,
+        name: &'a str,
+        ty: Option<SymbolType>,
+        depth: usize,
+        is_const: bool,
+    ) -> SymbolRef {
+        let id = gen_ident_id(name);
+        let sym;
+        if is_const {
+            sym = Symbol::new_const(
+                name,
+                ty.unwrap_or_else(|| panic!("Constant shall explicity have type")),
+                depth,
+            );
+        } else {
+            sym = Symbol::new(name, ty, depth);
+        }
+        self.get()
+            .get()
+            .borrow_mut()
+            .insert(id, Rc::new(RefCell::new(sym)));
+
+        SymbolRef::new(id, depth)
+    }
+    #[allow(dead_code)]
     pub fn count_live(&self) -> usize {
         let mut count = 1;
         let mut scope = &self.head;
@@ -83,7 +113,6 @@ impl<'a> ScopeList<'a> {
             match &scope.parent {
                 Some(parent) => {
                     count += 1;
-                    println!("Matches: {}", matches!(scope, parent));
                     scope = parent;
                 }
                 None => return count,

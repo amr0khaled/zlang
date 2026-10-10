@@ -10,7 +10,7 @@ use crate::{
         symbol::{Symbol, SymbolTable, SymbolType},
     },
     parser::{
-        node::{DataType, Node},
+        node::{DataType, Node, SymbolRef},
         ops::Operator,
     },
 };
@@ -68,24 +68,43 @@ impl<'a> Analyzer<'a> {
         Self { scopes, tables }
     }
 
-    pub fn scope_check(&mut self, node: &mut Box<Node<'a>>) -> SymbolType {
+    pub fn scope_check(&mut self, node: &mut Box<Node<'a>>) -> Option<SymbolType> {
         match &mut **node {
             Node::Program { statements, .. } => {
-                let mut ty: SymbolType = SymbolType::Void;
+                let mut ty: Option<SymbolType> = None;
                 for stmt in statements {
                     ty = self.scope_check(stmt);
+                }
+                let scope = self.scopes.get();
+                // TODO: Make it more dynamic but with some flags
+                let entrypoint_name = "main";
+                let ep_id = gen_ident_id(entrypoint_name);
+                match scope.lookup(&ep_id) {
+                    Some(ScopeRes::Local(_)) => {}
+                    _ => {
+                        #[cfg(not(test))]
+                        panic!("Cannot find entrypoint function '{}'", entrypoint_name);
+                    }
                 }
                 ty
             }
             Node::Block {
-                statements, depth, ..
+                statements,
+                depth,
+                is_body,
+                ..
             } => {
-                let mut ty: SymbolType = SymbolType::Void;
-                let table: Rc<RefCell<SymbolTable<'a>>> = Rc::new(RefCell::new(HashMap::new()));
-                self.tables.push(table.clone());
-                *depth = Some(self.tables.len() - 1);
-                let local_scope = Box::new(Scope::base(table));
-                self.scopes.push(local_scope);
+                let mut ty: Option<SymbolType> = None;
+                let table: Rc<RefCell<SymbolTable<'a>>>;
+                if !*is_body {
+                    table = Rc::new(RefCell::new(HashMap::new()));
+                    self.tables.push(table.clone());
+                    let local_scope = Box::new(Scope::base(table));
+                    *depth = Some(self.tables.len() - 1);
+                    self.scopes.push(local_scope);
+                } else {
+                    *depth = Some(self.tables.len() - 1);
+                }
                 for stmt in statements {
                     ty = self.scope_check(stmt);
                 }
@@ -94,18 +113,19 @@ impl<'a> Analyzer<'a> {
                 ty
             }
             Node::LetDecl {
-                decl,
-                info,
-                value,
-                r,
-                ..
+                decl, info, value, ..
             } => {
-                let ident = match &mut **decl {
-                    Node::Decl { ident, .. } => *ident,
-                    _ => panic!("Syntax error: Expected identifier not this {:?}", decl),
-                };
+                let immutable = false;
+                let ident = decl.ident;
                 let id = gen_ident_id(ident);
                 let ty = self.scope_check(value);
+                let decl_ty = SymbolType::from_datatype(decl.ty);
+                if ty.is_some() && decl_ty.is_some() && ty != decl_ty {
+                    panic!(
+                        "Both '{:#?}' and '{:#?}' should be the same type",
+                        ty, decl.ty
+                    )
+                }
                 let depth = self.tables.len() - 1;
                 let scope = self.scopes.get();
                 match scope.lookup(&id) {
@@ -113,31 +133,26 @@ impl<'a> Analyzer<'a> {
                         panic_log!(info, "Redeclaration of '{:?}'", decl)
                     }
                     _ => {
-                        let symbol = Symbol::new(&ident, ty, depth);
-                        scope
-                            .get()
-                            .borrow_mut()
-                            .insert(id, Rc::new(RefCell::new(symbol)));
-                        *r = Some(Box::new(Node::Ref(id, depth)));
+                        self.scopes.declare(&ident, ty, depth, immutable);
                     }
                 }
-                SymbolType::Void
+                None
             }
             Node::ConstDecl {
-                decl,
-                info,
-                value,
-                r,
-                ..
+                decl, info, value, ..
             } => {
-                let ident = match &mut **decl {
-                    Node::Decl { ident, .. } => *ident,
-                    _ => panic!("Syntax error: Expected identifier not this {:?}", decl),
-                };
+                let ident = decl.ident;
                 let id = gen_ident_id(ident);
-                let ty = self.scope_check(value);
-                if !ty.is_initialized() {
+                let ty = &self.scope_check(value);
+                let decl_ty = SymbolType::from_datatype(decl.ty);
+                if ty.is_none() || !ty.as_ref().unwrap().clone().is_initialized() {
                     panic!("Cannot declare constant '{}' without initial value", ident)
+                }
+                if *ty != decl_ty {
+                    panic!(
+                        "Both '{:#?}' and '{:#?}' should be the same type",
+                        ty, decl.ty
+                    )
                 }
                 let scopes = &mut self.scopes;
                 let depth = self.tables.len() - 1;
@@ -148,15 +163,10 @@ impl<'a> Analyzer<'a> {
                         // println!(" on line {}", ident, info.line)
                     }
                     _ => {
-                        let symbol = Symbol::new_const(&ident, ty, depth);
-                        scope
-                            .get()
-                            .borrow_mut()
-                            .insert(id, Rc::new(RefCell::new(symbol)));
-                        *r = Some(Box::new(Node::Ref(id, depth)))
+                        scopes.declare(ident, ty.clone(), depth, true);
                     }
                 }
-                SymbolType::Void
+                None
             }
             Node::IdentExpr { name, info, r, ty } => {
                 let scope = self.scopes.get();
@@ -165,19 +175,19 @@ impl<'a> Analyzer<'a> {
                     Some(ScopeRes::Local(a)) | Some(ScopeRes::Outer(a)) => {
                         let sym = a.borrow();
                         println!("Found: {:#?}", sym);
-                        *r = Some(Box::new(Node::Ref(id, sym.depth().clone())));
+                        *r = Some(SymbolRef::new(id, sym.depth().clone()));
                         let _ty = sym.get_type();
-                        *ty = Some(DataType::from_symbol(_ty));
-                        _ty
+                        *ty = DataType::from_symbol(_ty.clone());
+                        _ty.clone()
                     }
                     None => panic_log!(info, "Undeclared Variable '{}'", name), //panic!(" on line {}", name, info.line),
                 }
             }
             // TODO: Rewrite this
-            Node::IntLit { .. } => SymbolType::Signed32,
-            Node::FloatLit { .. } => SymbolType::Float32,
-            Node::BooleanLit { .. } => SymbolType::Boolean,
-            Node::Dynamic => SymbolType::Uninitialized,
+            Node::IntLit { ty, .. } => SymbolType::from_datatype(Some(*ty)),
+            Node::FloatLit { ty, .. } => SymbolType::from_datatype(Some(*ty)),
+            Node::BooleanLit { .. } => Some(SymbolType::Boolean),
+            Node::Dynamic => Some(SymbolType::Uninitialized),
             Node::AssignStmt {
                 ident,
                 value,
@@ -186,7 +196,14 @@ impl<'a> Analyzer<'a> {
                 op,
                 ..
             } => {
-                let id = gen_ident_id(ident);
+                let name: &str;
+                if let Node::IdentExpr { name: _name, .. } = &**ident {
+                    name = _name;
+                } else {
+                    panic!("Unexpected Error: expected identifier got '{:?}'", ident)
+                }
+                let id = gen_ident_id(name);
+
                 let current_depth = self.tables.len() - 1;
 
                 let lookup_res = {
@@ -194,11 +211,11 @@ impl<'a> Analyzer<'a> {
                     match scope.lookup(&id) {
                         Some(ScopeRes::Local(a)) => {
                             let v = a.borrow();
-                            Some((true, v.is_const(), v.depth().clone(), v.get_type()))
+                            Some((true, v.is_const(), v.depth().clone(), v.get_type().clone()))
                         }
                         Some(ScopeRes::Outer(a)) => {
                             let v = a.borrow();
-                            Some((false, v.is_const(), v.depth().clone(), v.get_type()))
+                            Some((false, v.is_const(), v.depth().clone(), v.get_type().clone()))
                         }
                         None => None,
                     }
@@ -207,10 +224,10 @@ impl<'a> Analyzer<'a> {
                 match lookup_res {
                     Some((local, is_const, decl_depth, expected_ty)) => {
                         if op == &Operator::AssignNew && local {
-                            panic!("Cannot declare an existing variable '{}'", ident);
+                            panic!("Cannot declare an existing variable '{}'", name);
                         }
                         if is_const {
-                            panic!("Cannot reassign a constant '{}' value", ident);
+                            panic!("Cannot reassign a constant '{}' value", name);
                         }
 
                         let rhs_ty = self.scope_check(value);
@@ -221,38 +238,37 @@ impl<'a> Analyzer<'a> {
                             );
                         }
 
-                        *r = Some(Box::new(Node::Ref(id, decl_depth)));
+                        *r = Some(SymbolRef::new(id, decl_depth));
                     }
                     None => {
                         if op == &Operator::AssignNew {
                             let new_ty = self.scope_check(value);
 
-                            // Insert into symbol table
-                            let symbol = Symbol::new(ident, new_ty, current_depth);
-                            self.scopes
-                                .get()
-                                .get()
-                                .borrow_mut()
-                                .insert(id, Rc::new(RefCell::new(symbol)));
+                            self.scopes.declare(name, new_ty, current_depth, false);
 
-                            *r = Some(Box::new(Node::Ref(id, current_depth)));
+                            *r = Some(SymbolRef::new(id, current_depth));
                         } else {
-                            panic_log!(info, "Undeclared Variable '{}'", ident);
+                            panic_log!(info, "Undeclared Variable '{}'", name);
                         }
                     }
                 }
-
-                SymbolType::Void
+                None
             }
             Node::ReturnExpr { node, .. } => self.scope_check(node),
 
-            Node::UnaryExpr { node, info, ty, .. } => {
+            Node::UnaryExpr {
+                node, info, ty, op, ..
+            } => {
                 let mut node_mut = node;
                 match self.scope_check(&mut node_mut) {
                     // TODO: Check the types
-                    x if x.is_literal() => {
-                        *ty = Some(DataType::from_symbol(x));
-                        x
+                    Some(x) if x.is_literal() => {
+                        *ty = DataType::from_symbol(Some(x.clone()));
+                        if *op == Operator::Not {
+                            Some(SymbolType::Boolean)
+                        } else {
+                            Some(x)
+                        }
                     }
                     y => panic!(
                         "This type '{:#?}' is not supported in UnaryExpr\n: Error: {:#?}",
@@ -265,12 +281,12 @@ impl<'a> Analyzer<'a> {
                 right,
                 info,
                 ty,
+                op,
                 ..
             } => {
                 let left_ty = match self.scope_check(left) {
-                    // TODO: Check the types
-                    x if x.is_literal() => {
-                        *ty = Some(DataType::from_symbol(x));
+                    Some(x) if x.is_literal() => {
+                        *ty = DataType::from_symbol(Some(x.clone()));
                         x
                     }
                     y => panic!(
@@ -279,93 +295,194 @@ impl<'a> Analyzer<'a> {
                     ),
                 };
                 let right_ty = match self.scope_check(right) {
-                    // TODO: Check the types
-                    x if x.is_literal() => x,
+                    Some(x) if x.is_literal() => x,
                     y => panic!(
                         "This type '{:#?}' is not supported in BinaryExpr\n: Error: {:#?}",
-                        y, info
+                        if y.is_some() { y } else { None },
+                        info
                     ),
                 };
+                if op.is_logical_operator() && !left_ty.is_bool() && !right_ty.is_bool() {
+                    panic_log!(
+                        info,
+                        "Both '{:#?}' and '{:#?}' should be boolean",
+                        left,
+                        right
+                    );
+                }
+                if op.is_compare_operator() {
+                    return Some(SymbolType::Boolean);
+                }
                 if right_ty != left_ty {
                     panic!(
                         "Both '{:#?}' and '{:#?}' should be the same type",
                         left, right
                     )
                 }
-                left_ty
+                Some(left_ty)
             }
-            // Node::CallExpr {
-            //     ident,
-            //     args,
-            //     kind,
-            //     info,
-            // } => ,
-            // Node::ExprStmt { node, info } => todo!(),
-            _ => SymbolType::Void,
+            Node::DataType(dt) => SymbolType::from_datatype(Some(*dt)),
+            // ### Function
+            Node::FunctionDecl {
+                decl,
+                compile_params,
+                runtime_params,
+                block,
+                info,
+                ..
+            } => {
+                let id = gen_ident_id(decl.ident);
+                let scope = self.scopes.get();
+                match scope.lookup(&id) {
+                    Some(ScopeRes::Local(_)) => {
+                        panic_log!(info, "Redeclaration of '{:?}' function", decl.ident)
+                    }
+                    _ => {
+                        let table = Rc::new(RefCell::new(HashMap::new()));
+                        self.tables.push(table.clone());
+                        let depth = self.tables.len();
+                        let mut _compiler_params = vec![];
+                        let mut _runtime_params = vec![];
+                        for param in compile_params {
+                            let ty = SymbolType::from_datatype(param.ty).unwrap_or_else(|| {
+                                panic_log!(
+                                    info,
+                                    "Either type wasn't explicitly type or unsupported type"
+                                )
+                            });
+                            _compiler_params.push(ty.clone());
+                            let sym = Symbol::new(param.ident, Some(ty), depth);
+
+                            table
+                                .borrow_mut()
+                                .insert(sym.get_id().clone(), Rc::new(RefCell::new(sym)));
+                        }
+                        for param in runtime_params {
+                            let ty = SymbolType::from_datatype(param.ty).unwrap_or_else(|| {
+                                panic_log!(
+                                    info,
+                                    "Either type wasn't explicitly type or unsupported type"
+                                )
+                            });
+                            _runtime_params.push(ty.clone());
+                            let sym = Symbol::new(param.ident, Some(ty), depth);
+
+                            table
+                                .borrow_mut()
+                                .insert(sym.get_id().clone(), Rc::new(RefCell::new(sym)));
+                        }
+                        let mut ret_ty = None;
+                        if decl.ty.is_some() {
+                            ret_ty = SymbolType::from_datatype(decl.ty);
+                        }
+                        let ty = SymbolType::Fn {
+                            compile_params: _compiler_params,
+                            runtime_params: _runtime_params,
+                            ret_ty: Box::new(ret_ty.clone()),
+                        };
+                        self.scopes
+                            .declare(&decl.ident, Some(ty.clone()), depth - 1, true);
+
+                        let local_scope = Box::new(Scope::base(table.clone()));
+                        self.scopes.push(local_scope);
+                        let actual_ret_ty = match self.scope_check(block) {
+                            Some(x) if x.is_literal() => Some(x),
+                            None => None,
+                            y => panic!(
+                                "This type '{:#?}' is not supported as Function return type\n: Error: {:#?}",
+                                y.unwrap(),
+                                info
+                            ),
+                        };
+                        if ret_ty.clone() != actual_ret_ty {
+                            panic!(
+                                "Function return type '{:#?}' should match actual returned type '{:#?}'",
+                                ret_ty, actual_ret_ty
+                            )
+                        }
+                        Some(ty)
+                    }
+                }
+            }
+            Node::CallExpr {
+                ident,
+                compile_args,
+                runtime_args,
+
+                info,
+                r,
+                ..
+            } => {
+                let name: &str;
+                if let Node::IdentExpr { name: _name, .. } = &**ident {
+                    name = _name;
+                } else {
+                    panic_log!(
+                        info,
+                        "Unexpected Error: expected identifier got '{:?}'",
+                        ident
+                    )
+                }
+                let id = gen_ident_id(name);
+                let scope = self.scopes.get();
+                match scope.lookup(&id) {
+                    Some(ScopeRes::Local(a)) | Some(ScopeRes::Outer(a)) => {
+                        let sym = a.borrow();
+                        let depth = self.tables.len() - 1;
+                        *r = Some(SymbolRef::new(id, depth));
+                        let SymbolType::Fn {
+                            compile_params,
+                            runtime_params,
+                            ret_ty,
+                        } = sym.get_type().clone().unwrap()
+                        else {
+                            panic_log!(info, "'{}' is not a function to be called", name)
+                        };
+                        if compile_params.len() != compile_args.len() {
+                            panic_log!(
+                                info,
+                                "Compile-time arguments should match paramters in length"
+                            );
+                        } else if runtime_params.len() != runtime_args.len() {
+                            panic_log!(info, "Runtime arguments should match paramters in length");
+                        }
+                        for i in 0..compile_args.len() {
+                            let arg = &mut compile_args[i];
+                            let arg_ty = self.scope_check(arg);
+                            let param_ty = Some(compile_params[i].clone());
+                            if arg_ty != param_ty {
+                                panic_log!(
+                                    info,
+                                    "Compile-time argument '${}' type should match paramter ${}",
+                                    i,
+                                    i
+                                );
+                            }
+                        }
+                        for i in 0..runtime_args.len() {
+                            let arg = &mut runtime_args[i];
+                            let arg_ty = self.scope_check(arg);
+                            let param_ty = Some(runtime_params[i].clone());
+                            if arg_ty != param_ty {
+                                panic_log!(
+                                    info,
+                                    "Runtime argument '${}' type should match paramter ${}",
+                                    i,
+                                    i
+                                );
+                            }
+                        }
+                        *ret_ty
+                    }
+                    None => panic_log!(info, "Undeclared function '{}'", name),
+                }
+            }
+            Node::Empty => None,
+            //_ => SymbolType::Void,
         }
     }
 }
 
 #[cfg(test)]
 #[deny(dead_code)]
-mod tests {
-    use crate::{
-        analyzer::{self, Analyzer},
-        parser::{Parser, node::NodeDetails},
-    };
-
-    #[test]
-    fn test_correct_let_expr() {
-        let line = "let x = 5;";
-        let mut parser = Parser::new(line);
-
-        let var_info = NodeDetails::new(1, 1);
-        let decl_info = NodeDetails::new(1, 5);
-        let integer_info = NodeDetails::new(1, 9);
-        let mut node = Box::new(parser.parse());
-
-        let mut analyzer = Analyzer::new();
-        analyzer.scope_check(&mut node);
-    }
-    #[test]
-    fn test_correct_let_expr2() {
-        let line = "let t = 3; let x = t + 5;";
-        let mut parser = Parser::new(line);
-
-        let var_info = NodeDetails::new(1, 1);
-        let decl_info = NodeDetails::new(1, 5);
-        let integer_info = NodeDetails::new(1, 9);
-        let mut node = Box::new(parser.parse());
-
-        let mut analyzer = Analyzer::new();
-        analyzer.scope_check(&mut node);
-    }
-    #[test]
-    #[should_panic]
-    fn test_incorrect_let_expr() {
-        let line = "let x t = 5;";
-        let mut parser = Parser::new(line);
-
-        let var_info = NodeDetails::new(1, 1);
-        let decl_info = NodeDetails::new(1, 5);
-        let integer_info = NodeDetails::new(1, 9);
-        let mut node = Box::new(parser.parse());
-
-        let mut analyzer = Analyzer::new();
-        analyzer.scope_check(&mut node);
-    }
-    #[test]
-    #[should_panic]
-    fn test_incorrect_let_expr2() {
-        let line = "let x  = t 5;";
-        let mut parser = Parser::new(line);
-
-        let var_info = NodeDetails::new(1, 1);
-        let decl_info = NodeDetails::new(1, 5);
-        let integer_info = NodeDetails::new(1, 9);
-        let mut node = Box::new(parser.parse());
-
-        let mut analyzer = Analyzer::new();
-        analyzer.scope_check(&mut node);
-    }
-}
+mod tests;
