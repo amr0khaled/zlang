@@ -1,4 +1,3 @@
-use core::panic;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
@@ -9,6 +8,7 @@ use crate::{
         },
         symbol::{Symbol, SymbolTable, SymbolType},
     },
+    dpanic, dprintln,
     parser::{
         node::{DataType, Node, SymbolRef},
         ops::Operator,
@@ -16,19 +16,6 @@ use crate::{
 };
 mod scope;
 pub mod symbol;
-
-#[macro_export]
-macro_rules! log {
-    ($inf:ident, $($arg:tt)*) => {{
-        println!("{} <- {:#?}", $inf.log(), format_args!($($arg)*));
-    }};
-}
-#[macro_export]
-macro_rules! panic_log {
-    ($inf:ident, $($arg:tt)*) => {{
-        panic!("{} <- {:#?}", $inf.log(), format_args!($($arg)*));
-    }};
-}
 
 pub fn gen_ident_id(ident: &str) -> u32 {
     let id: u32 = 0xbeef;
@@ -130,7 +117,7 @@ impl<'a> Analyzer<'a> {
                 let scope = self.scopes.get();
                 match scope.lookup(&id) {
                     Some(ScopeRes::Local(_)) => {
-                        panic_log!(info, "Redeclaration of '{:?}'", decl)
+                        dpanic!(info, "Redeclaration of '{:?}'", decl)
                     }
                     _ => {
                         self.scopes.declare(&ident, ty, depth, immutable);
@@ -159,8 +146,7 @@ impl<'a> Analyzer<'a> {
                 let scope = scopes.get();
                 match scope.lookup(&id) {
                     Some(ScopeRes::Local(_)) => {
-                        panic_log!(info, "Redeclaration of '{}'", ident);
-                        // println!(" on line {}", ident, info.line)
+                        dpanic!(info, "Redeclaration of '{}'", ident);
                     }
                     _ => {
                         scopes.declare(ident, ty.clone(), depth, true);
@@ -174,13 +160,13 @@ impl<'a> Analyzer<'a> {
                 match scope.lookup(&id) {
                     Some(ScopeRes::Local(a)) | Some(ScopeRes::Outer(a)) => {
                         let sym = a.borrow();
-                        println!("Found: {:#?}", sym);
+                        dprintln!("Found: {:#?}", sym);
                         *r = Some(SymbolRef::new(id, sym.depth().clone()));
                         let _ty = sym.get_type();
                         *ty = DataType::from_symbol(_ty.clone());
                         _ty.clone()
                     }
-                    None => panic_log!(info, "Undeclared Variable '{}'", name), //panic!(" on line {}", name, info.line),
+                    None => dpanic!(info, "Undeclared Variable '{}'", name), //panic!(" on line {}", name, info.line),
                 }
             }
             // TODO: Rewrite this
@@ -248,7 +234,7 @@ impl<'a> Analyzer<'a> {
 
                             *r = Some(SymbolRef::new(id, current_depth));
                         } else {
-                            panic_log!(info, "Undeclared Variable '{}'", name);
+                            dpanic!(info, "Undeclared Variable '{}'", name);
                         }
                     }
                 }
@@ -303,7 +289,7 @@ impl<'a> Analyzer<'a> {
                     ),
                 };
                 if op.is_logical_operator() && !left_ty.is_bool() && !right_ty.is_bool() {
-                    panic_log!(
+                    dpanic!(
                         info,
                         "Both '{:#?}' and '{:#?}' should be boolean",
                         left,
@@ -335,7 +321,7 @@ impl<'a> Analyzer<'a> {
                 let scope = self.scopes.get();
                 match scope.lookup(&id) {
                     Some(ScopeRes::Local(_)) => {
-                        panic_log!(info, "Redeclaration of '{:?}' function", decl.ident)
+                        dpanic!(info, "Redeclaration of '{:?}' function", decl.ident)
                     }
                     _ => {
                         let table = Rc::new(RefCell::new(HashMap::new()));
@@ -345,7 +331,7 @@ impl<'a> Analyzer<'a> {
                         let mut _runtime_params = vec![];
                         for param in compile_params {
                             let ty = SymbolType::from_datatype(param.ty).unwrap_or_else(|| {
-                                panic_log!(
+                                dpanic!(
                                     info,
                                     "Either type wasn't explicitly type or unsupported type"
                                 )
@@ -359,7 +345,7 @@ impl<'a> Analyzer<'a> {
                         }
                         for param in runtime_params {
                             let ty = SymbolType::from_datatype(param.ty).unwrap_or_else(|| {
-                                panic_log!(
+                                dpanic!(
                                     info,
                                     "Either type wasn't explicitly type or unsupported type"
                                 )
@@ -417,7 +403,7 @@ impl<'a> Analyzer<'a> {
                 if let Node::IdentExpr { name: _name, .. } = &**ident {
                     name = _name;
                 } else {
-                    panic_log!(
+                    dpanic!(
                         info,
                         "Unexpected Error: expected identifier got '{:?}'",
                         ident
@@ -436,22 +422,22 @@ impl<'a> Analyzer<'a> {
                             ret_ty,
                         } = sym.get_type().clone().unwrap()
                         else {
-                            panic_log!(info, "'{}' is not a function to be called", name)
+                            dpanic!(info, "'{}' is not a function to be called", name)
                         };
                         if compile_params.len() != compile_args.len() {
-                            panic_log!(
+                            dpanic!(
                                 info,
                                 "Compile-time arguments should match paramters in length"
                             );
                         } else if runtime_params.len() != runtime_args.len() {
-                            panic_log!(info, "Runtime arguments should match paramters in length");
+                            dpanic!(info, "Runtime arguments should match paramters in length");
                         }
                         for i in 0..compile_args.len() {
                             let arg = &mut compile_args[i];
                             let arg_ty = self.scope_check(arg);
                             let param_ty = Some(compile_params[i].clone());
                             if arg_ty != param_ty {
-                                panic_log!(
+                                dpanic!(
                                     info,
                                     "Compile-time argument '${}' type should match paramter ${}",
                                     i,
@@ -464,7 +450,7 @@ impl<'a> Analyzer<'a> {
                             let arg_ty = self.scope_check(arg);
                             let param_ty = Some(runtime_params[i].clone());
                             if arg_ty != param_ty {
-                                panic_log!(
+                                dpanic!(
                                     info,
                                     "Runtime argument '${}' type should match paramter ${}",
                                     i,
@@ -474,7 +460,7 @@ impl<'a> Analyzer<'a> {
                         }
                         *ret_ty
                     }
-                    None => panic_log!(info, "Undeclared function '{}'", name),
+                    None => dpanic!(info, "Undeclared function '{}'", name),
                 }
             }
             Node::Empty => None,

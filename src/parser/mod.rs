@@ -2,6 +2,7 @@ use core::panic;
 use std::vec;
 
 use crate::{
+    dprintln,
     lexer::{
         Token, Tokenizer,
         types::TokenType::{self, SemiColon},
@@ -133,7 +134,7 @@ impl<'a> Parser<'a> {
             _info = Some(Node::info(self.peek()));
             TokenType::CloseBracket
         } else {
-            println!("WHAT?: {:?}", self.peek().kind);
+            dprintln!("WHAT?: {:?}", self.peek().kind);
             self.expect_one_of(&[TokenType::EOL, TokenType::SemiColon, TokenType::EOF])
                 .unwrap()
                 .kind
@@ -201,7 +202,7 @@ impl<'a> Parser<'a> {
         }
         expect!(self, TokenType::OpenParenthese);
         runtime_params = self.parse_params(TokenType::CloseParenthese);
-        println!("PEEK BLOCK: {:?}", self.peek().kind);
+        dprintln!("PEEK BLOCK: {:?}", self.peek().kind);
         let mut block = self.parse_block();
         if let Node::Block { is_body, .. } = &mut block {
             *is_body = true
@@ -242,7 +243,7 @@ impl<'a> Parser<'a> {
     }
     fn parse_args(&mut self, condition_token: TokenType) -> Vec<Box<Node<'a>>> {
         let mut args: Vec<Box<Node<'a>>> = vec![];
-        println!("LOOP: {:?} {:?}", self.peek().kind, condition_token);
+        dprintln!("LOOP: {:?} {:?}", self.peek().kind, condition_token);
         while self.peek().kind != condition_token {
             if self.peek().kind == TokenType::EOF {
                 syntax_error!("Unclosed argument list");
@@ -281,7 +282,7 @@ impl<'a> Parser<'a> {
             let (stmt, end, _info) = self.parse_statement();
             if stmt != Node::Empty {
                 if end != TokenType::SemiColon && self.peek().kind == TokenType::CloseBracket {
-                    println!("NODEEEE: {:?}", stmt);
+                    dprintln!("NODEEEE: {:?}", stmt);
                     stmts.push(Box::new(Node::ReturnExpr {
                         node: Box::new(stmt),
                         info: _info.unwrap(),
@@ -443,7 +444,7 @@ impl<'a> Parser<'a> {
         };
 
         loop {
-            println!("PEEK: {:?}", self.peek().kind);
+            dprintln!("PEEK: {:?}", self.peek().kind);
             match self.peek().kind {
                 TokenType::Ident
                 | TokenType::IntLiteral
@@ -498,18 +499,18 @@ impl<'a> Parser<'a> {
                     self.next();
                 }
                 _ => {
-                    println!("BREAKING ON: {:?}", self.peek().kind);
+                    dprintln!("BREAKING ON: {:?}", self.peek().kind);
                     break;
                 }
             };
-            println!("NODES: {:#?}", nodes);
-            println!("OPS: {:#?}", ops);
+            dprintln!("NODES: {:#?}", nodes);
+            dprintln!("OPS: {:#?}", ops);
         }
         while let Some((tok, unary)) = ops.pop() {
             combine(&mut nodes, tok, unary, after_op);
         }
         let node = nodes.pop().unwrap();
-        println!("RETURNED: {:?}", node);
+        dprintln!("RETURNED: {:?}", node);
         node
     }
     fn parse_primary(&mut self) -> Node<'a> {

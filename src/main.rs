@@ -1,5 +1,7 @@
 use std::env;
 
+use env_logger::{Builder, Env};
+
 use crate::{
     analyzer::Analyzer,
     // cg::Memory,
@@ -23,6 +25,14 @@ pub mod util;
 // }
 
 fn main() {
+    #[cfg(not(is_release))]
+    let default_level = "trace";
+
+    #[cfg(is_release)]
+    let default_level = "error";
+
+    Builder::from_env(Env::default().default_filter_or(default_level)).init();
+
     let args: Vec<String> = env::args().collect();
     let filename = args[1].as_str();
     let content = read_file(filename);
@@ -52,7 +62,7 @@ fn main() {
     opcode_file.push_str(".z.opcodes");
     match overwrite_file(&node_file, node_struct) {
         Ok(()) => {}
-        Err(e) => panic!("FS Error: {:?}", e),
+        Err(e) => dpanic!("FS Error: {:?}", e),
     }
     // match overwrite_file(&opcode_file, format!("{:#?}", ins)) {
     //     Ok(()) => {}

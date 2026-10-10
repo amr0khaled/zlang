@@ -105,8 +105,32 @@ pub fn append_file(filename: &str, content: String) -> Result<(), std::io::Error
 }
 
 #[macro_export]
-macro_rules! error {
-    ($inf:ident, $($arg:tt)*) => {{
-        println!("{} : {}", $inf.log(), format_args!($($arg)*));
+macro_rules! dprintln {
+    ($($arg:tt)*) => {{
+        if cfg!(test) {
+            static INIT_LOGGER: ::std::sync::Once = ::std::sync::Once::new();
+            INIT_LOGGER.call_once(|| {
+                let _ = ::env_logger::Builder::from_env(
+                    ::env_logger::Env::default().default_filter_or("trace")
+                ).try_init();
+            });
+            ::log::debug!($($arg)*);
+        } else if cfg!(not(is_release)) {
+
+            ::log::trace!($($arg)*);
+        }
+
     }};
+
+}
+#[macro_export]
+macro_rules! dpanic {
+    ($inf:ident, $($arg:tt)*) => {{
+        let arg = format_args!("{} <- {:#?}", $inf.log(), format_args!($($arg)*));
+        ::log::error!("{}", arg);
+        panic!("");
+    }};
+    ($($arg:tt)*) =>{{
+        panic!($($arg)*)
+    }}
 }
