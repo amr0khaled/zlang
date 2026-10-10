@@ -41,7 +41,7 @@ impl<'a> Memory<'a> {
     }
     pub fn emit(&mut self, node: &Node) {
         match node {
-            Node::Ref(_, _) => todo!(),
+            // Node::Ref(_, _) => todo!(),
             Node::IntLit { v, .. } => {
                 self.push_uint32(*v as u32);
             }

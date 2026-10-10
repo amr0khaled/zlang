@@ -2,13 +2,13 @@ use std::env;
 
 use crate::{
     analyzer::Analyzer,
-    cg::Memory,
+    // cg::Memory,
     parser::Parser,
     util::{overwrite_file, read_file},
 };
 
 pub mod analyzer;
-mod cg;
+// mod cg;
 mod lexer;
 pub mod parser;
 pub mod util;
@@ -24,15 +24,6 @@ pub mod util;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let line = "let x = {return 5 + 4;};
-    x = 5;
-    let y = x;
-    {
-        let y = x + 5;
-        y;
-    }
-    const z = {y};
-    ";
     let filename = args[1].as_str();
     let content = read_file(filename);
 

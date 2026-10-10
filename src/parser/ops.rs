@@ -95,6 +95,57 @@ impl Operator {
             _ => None,
         }
     }
+    pub fn is_assign_operator(&self) -> bool {
+        match self {
+            Operator::Assign
+            | Operator::AssignNew
+            | Operator::AssignPlus
+            | Operator::AssignMinus
+            | Operator::AssignMultiply
+            | Operator::AssignPower
+            | Operator::AssignAnd
+            | Operator::AssignOr
+            | Operator::AssignDivide
+            | Operator::AssignModolus
+            | Operator::AssignBinaryAnd
+            | Operator::AssignBinaryOr
+            | Operator::AssignBinaryXor => true,
+            _ => false,
+        }
+    }
+    pub fn is_logical_operator(&self) -> bool {
+        match self {
+            Operator::And | Operator::Or => true,
+            _ => false,
+        }
+    }
+    pub fn is_equality_compare(&self) -> bool {
+        match self {
+            Operator::Equality | Operator::NotEquality => true,
+            _ => false,
+        }
+    }
+    pub fn is_compare_operator(&self) -> bool {
+        match self {
+            Operator::GreaterThan
+            | Operator::LesserThan
+            | Operator::GreaterThanOrEqual
+            | Operator::LesserThanOrEqual => true,
+            _ => false,
+        }
+    }
+    pub fn is_prefix_unary(&self) -> bool {
+        match self {
+            Operator::Not | Operator::PreIncrement | Operator::PreDecrement => true,
+            _ => false,
+        }
+    }
+    pub fn is_postfix_unary(&self) -> bool {
+        match self {
+            Operator::PostIncrement | Operator::PostDecrement => true,
+            _ => false,
+        }
+    }
 }
 pub fn get_hint<'a>(op: Operator) -> &'a str {
     if op < EndArithmatic {
@@ -112,4 +163,26 @@ pub fn get_hint<'a>(op: Operator) -> &'a str {
     } else {
         "Unknown"
     }
+}
+
+fn get_predence(op: &Operator) -> u8 {
+    match op {
+        x if x.is_assign_operator() => 1,
+        Operator::Or => 2,
+        x if x.is_equality_compare() => 4,
+        x if x.is_compare_operator() => 5,
+        Operator::Sub | Operator::And => 6,
+        Operator::Mul | Operator::Div | Operator::Mod => 7,
+        Operator::Power => 8,
+        x if x.is_prefix_unary() => 9,
+        x if x.is_postfix_unary() => 10,
+        _ => 0,
+    }
+}
+pub fn get_pred(token: TokenType) -> u8 {
+    let op = Operator::from_token(token);
+    if op.is_some() {
+        return get_predence(&op.unwrap());
+    }
+    0
 }

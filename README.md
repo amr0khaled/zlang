@@ -17,6 +17,13 @@ and only with value
 ## Function declaration
 `fn name[:ty]\[bind[, bind]...\](bind[, bind]...) {...}`
 
+### Return statement
+`return expr;`
+`expr` is required
+So return won't accept empty `expr`
+if you want to indicate a `void`
+or no return type just end last statement with semicolon
+
 ## Control Flow
 
 ### If condition

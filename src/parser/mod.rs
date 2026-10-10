@@ -1,11 +1,14 @@
 use core::panic;
+use std::vec;
 
 use crate::{
-    error,
-    lexer::{Token, Tokenizer, types::TokenType},
+    lexer::{
+        Token, Tokenizer,
+        types::TokenType::{self, SemiColon},
+    },
     parser::{
-        node::{DataType, Node},
-        ops::{Operator, get_hint},
+        node::{BoundVar, DataType, Node, NodeDetails},
+        ops::{Operator, get_pred},
     },
 };
 pub mod node;
@@ -83,561 +86,10 @@ impl<'a> Parser<'a> {
             );
         }
     }
-    fn parse_arg(&mut self) -> Node<'a> {
-        let node = self.parse_primary();
-        if self.peek().kind == TokenType::Comma {
-            expect!(self, TokenType::Comma);
-        }
-        node
-    }
-    // Determine parameters or args between [] or () based on Closing condition token type
-    fn parse_params(&mut self, condition_token: TokenType) -> Vec<Box<Node<'a>>> {
-        let mut params: Vec<Box<Node<'a>>> = vec![];
-        if self.peek().kind != condition_token {
-            loop {
-                if self.peek().kind == condition_token {
-                    break;
-                }
-                let node = self.parse_arg();
-                params.push(Box::new(node));
-            }
-        }
-        expect!(self, condition_token);
-        params
-    }
-    fn parse_primary(&mut self) -> Node<'a> {
-        let token = self.next();
-        let info = Node::info(&token);
-        let result = match token.kind {
-            TokenType::I8 | TokenType::I16 | TokenType::I32 | TokenType::I64 => {
-                let ty = DataType::from_token(token.kind);
-                Node::DataType(ty)
-            }
-            TokenType::U8 | TokenType::U16 | TokenType::U32 | TokenType::U64 => {
-                let ty = DataType::from_token(token.kind);
-                Node::DataType(ty)
-                //let (v, size) = match ty.get_size() {
-                //    8 => (token.pointer.parse::<u8>().unwrap() as u64, 1),
-                //    16 => (token.pointer.parse::<u16>().unwrap() as u64, 2),
-                //    32 => (token.pointer.parse::<u32>().unwrap() as u64, 4),
-                //    64 => (token.pointer.parse::<u64>().unwrap(), 8),
-                //    _ => panic!("Line {}: Invalid integer '{}'", token.line, token.pointer),
-                //};
-            }
-            TokenType::IntLiteral => {
-                let v = token.pointer.parse::<i64>().unwrap_or_else(|_| {
-                    panic!("Line {}: Invalid integer '{}'", token.line, token.pointer)
-                });
-                let mut ty = DataType::Signed32;
-                let mut size: usize = 4;
-                if self.peek().kind == TokenType::As {
-                    ty = self.parse_type();
-                    println!("ty: {:#?}", ty);
-                    size = ty.get_size();
-                    println!("SSIIZ {}", size);
-                }
-                println!("ty after: {:#?}", ty);
-                Node::IntLit { v, size, info }
-            }
-            TokenType::FloatLiteral => {
-                let v = token.pointer.parse::<f64>().unwrap_or_else(|_| {
-                    panic!("Line {}: Invalid integer '{}'", token.line, token.pointer)
-                });
-                let mut ty = DataType::Signed32;
-                let mut size: usize = 4;
-                if self.peek().kind == TokenType::As {
-                    ty = self.parse_type();
-                    println!("ty: {:#?}", ty);
-                    size = ty.get_size();
-                    println!("SSIIZ {}", size);
-                }
-                Node::FloatLit { v, size, info }
-            }
-            TokenType::F32 | TokenType::F64 => {
-                let ty = DataType::from_token(token.kind);
-                // let (v, size) = match ty.get_size() {
-                //     32 => (token.pointer.parse::<f32>().unwrap() as f64, 4),
-                //     64 => (token.pointer.parse::<f64>().unwrap(), 8),
-                //     _ => panic!("Line {}: Invalid Float '{}'", token.line, token.pointer),
-                // };
-                Node::DataType(ty)
-            }
-            TokenType::BoolLiteral => {
-                let v = token.pointer.parse::<bool>().unwrap();
-                Node::BooleanLit { v, info }
-            }
-            TokenType::Function => {
-                let info = Node::info(&token);
-                let decl = Box::new(self.parse_decl(false));
-                let mut args: Vec<Box<Node<'a>>> = vec![];
-                let mut params: Vec<Box<Node<'a>>> = vec![];
-                if self.peek().kind == TokenType::OpenSquareBracket {
-                    expect!(self, TokenType::OpenSquareBracket);
-                    params = self.parse_params(TokenType::CloseSquareBracket);
-                }
-                expect!(self, TokenType::OpenParenthese);
-                args = self.parse_params(TokenType::CloseParenthese);
-                let mut block = Box::new(self.parse_primary());
-                if let Node::Block { is_body, .. } = &mut (*block) {
-                    *is_body = true;
-                }
-                Node::FunctionDecl {
-                    decl,
-                    params,
-                    args,
-                    block,
-                    kind: "FunDecl",
-                    info,
-                }
-            }
-            TokenType::Ident => {
-                let info = Node::info(&token);
-                let ident = Box::new(Node::IdentExpr {
-                    name: token.pointer,
-                    r: None,
-                    ty: None,
-                    info,
-                });
-                if matches!(
-                    self.peek().kind,
-                    TokenType::OpenParenthese | TokenType::OpenSquareBracket
-                ) {
-                    let mut params = vec![];
-                    let mut args = vec![];
-                    if self.peek().kind == TokenType::OpenSquareBracket {
-                        expect!(self, TokenType::OpenSquareBracket);
-                        params = self.parse_params(TokenType::CloseSquareBracket);
-                    }
-                    expect!(self, TokenType::OpenParenthese);
-                    args = self.parse_params(TokenType::CloseParenthese);
-                    Node::CallExpr {
-                        ident,
-                        params,
-                        args,
-                        kind: "CallExpr",
-                        info,
-                        r: None,
-                    }
-                } else {
-                    *ident
-                }
-            }
-            TokenType::OpenParenthese => {
-                let inner = self.parse_expr();
-                expect!(self, TokenType::CloseParenthese);
-                inner
-            }
-            TokenType::Not => Node::UnaryExpr {
-                op: Operator::Not,
-                node: Box::new(self.parse_expr()),
-                kind: "Inverse Logic",
-                ty: None,
-                info,
-            },
-            TokenType::Increment => {
-                let op;
-                let node;
-                if self.peek().kind == TokenType::Ident {
-                    let ident = self.next();
-                    node = Node::IdentExpr {
-                        name: ident.pointer,
-                        r: None,
-                        ty: None,
-                        info,
-                    };
-                    op = Operator::PreIncrement;
-                } else {
-                    op = Operator::PostIncrement;
-                    node = Node::Empty;
-                }
-                Node::UnaryExpr {
-                    op,
-                    node: Box::new(node),
-                    kind: get_hint(op),
-                    ty: None,
-                    info,
-                }
-            }
-            TokenType::Decrement => {
-                let op;
-                let node;
-                if self.peek().kind == TokenType::Ident {
-                    let ident = self.next();
-                    node = Node::IdentExpr {
-                        name: ident.pointer,
-                        r: None,
-                        ty: None,
-                        info,
-                    };
-                    op = Operator::PreDecrement;
-                } else {
-                    node = Node::Empty;
-                    op = Operator::PostDecrement;
-                }
-                Node::UnaryExpr {
-                    op,
-                    node: Box::new(node),
-                    kind: get_hint(op),
-                    ty: None,
-                    info,
-                }
-            }
-            TokenType::OpenBracket => self.parse_block(),
-            TokenType::SemiColon => Node::Empty,
-            _ => panic!(
-                "Line {}:{}: Unexpected token {:#?}",
-                token.line, token.col, token.kind
-            ),
-        };
-        result
-    }
-    fn parse_expr(&mut self) -> Node<'a> {
-        #[cfg(test)]
-        {
-            println!("expr");
-            println!("expr: left {:#?}", self.peek().kind);
-        }
-        println!("SSS");
-        let left = self.parse_primary();
-        self.parse_expr_remain(left)
-    }
-    fn parse_expr_remain(&mut self, mut left: Node<'a>) -> Node<'a> {
-        #[cfg(test)]
-        {
-            println!("expr remain");
-            println!("expr: right {:#?}", self.peek().kind);
-        }
-        match self.peek().kind {
-            // WARNING: I don't know what is this but be careful
-            // TokenType::Ident => loop {},
-            _ => loop {
-                let op = Operator::from_token(self.peek().kind);
-                if op == None {
-                    break;
-                    // panic!("Unexpected token: {:#?}", token)
-                }
-                self.next();
-                println!("expr: right");
-                let right = self.parse_primary();
-                left = Node::BinaryExpr {
-                    op: op.unwrap(),
-                    left: Box::new(left),
-                    right: Box::new(right),
-                    kind: get_hint(op.unwrap()),
-                    ty: None,
-                    info: Node::info(&self.peek()),
-                };
-            },
-        }
-        left
-    }
-    fn parse_return(&mut self) -> Node<'a> {
-        let info = Node::info(&self.peek());
-        expect!(self, TokenType::Return);
-        let token = self.peek();
-        let node = match token.kind {
-            x if is_operator(x) => panic!(
-                "Cannot have operator '{}' after return on line {}",
-                token.pointer, token.line
-            ),
-            x if is_assign_operator(x) => panic!(
-                "Cannot have assign operator '{}' after return on line {}",
-                token.pointer, token.line
-            ),
-            x if is_literal(x) => {
-                println!("return: before expr");
-                self.parse_expr()
-            }
-            TokenType::SemiColon | TokenType::EOL => {
-                self.next();
-                Node::Empty
-            }
-            TokenType::OpenBracket => self.parse_block(),
-            TokenType::Ident => self.parse_statement(),
-            _ => panic!("What had happend?"),
-        };
-        Node::ReturnExpr {
-            node: Box::new(node),
-            info,
-        }
-    }
-    fn parse_type_from_value(&self, value: &Node<'a>) -> DataType {
-        match value {
-            Node::IntLit { size: 1, .. } => DataType::Signed8,
-            Node::IntLit { size: 2, .. } => DataType::Signed16,
-            Node::IntLit { size: 4, .. } => DataType::Signed32,
-            Node::IntLit { size: 8, .. } => DataType::Signed64,
-
-            Node::FloatLit { size: 4, .. } => DataType::Float32,
-            Node::FloatLit { size: 8, .. } => DataType::Float64,
-
-            Node::BooleanLit { .. } => DataType::Boolean,
-            Node::Dynamic => DataType::Dynamic,
-            _ => DataType::Dynamic,
-        }
-    }
-    fn parse_let(&mut self, constant: bool) -> Node<'a> {
-        println!("var ");
-        let keyword = self.next();
-        let mut decl = Box::new(self.parse_decl(false));
-        let (peek_pointer, peek_kind, peek_line) = {
-            let peek = self.peek();
-            (peek.pointer, peek.kind, peek.line)
-        };
-        let unintialized_decl = || {
-            println!(
-                "dynamic ident: '{}' {:?} line {}",
-                peek_pointer, peek_kind, peek_line
-            );
-            let value = Box::new(Node::Dynamic);
-            (Operator::AssignNew, value)
-        };
-        let (_ty, value) = match peek_kind {
-            x if is_assign_operator(x) => self.parse_assign_core(),
-            TokenType::SemiColon => {
-                expect!(self, TokenType::SemiColon);
-                unintialized_decl()
-            }
-            TokenType::EOL | TokenType::EOF | TokenType::Comma => unintialized_decl(),
-            _ => {
-                let peek = self.peek();
-                panic!("Line {}:Unexpected token '{:?}'", peek.line, peek.kind)
-            }
-        };
-        self.eol();
-        let info = Node::info(&keyword);
-        let _ty = self.parse_type_from_value(&value);
-        if let Node::Decl { ty, .. } = &mut (*decl) {
-            if ty.unwrap() == DataType::Dynamic {
-                *ty = Some(_ty);
-            }
-        }
-        if constant {
-            Node::ConstDecl {
-                decl,
-                value,
-                kind: "ConstDecl",
-                info,
-                r: None,
-            }
-        } else {
-            Node::LetDecl {
-                decl,
-                value,
-                kind: "LetDecl",
-                info,
-                r: None,
-            }
-        }
-    }
-
-    fn parse_type(&mut self) -> DataType {
-        let mut ty: DataType = DataType::Dynamic;
-        if self
-            .expect_one_of(&[TokenType::Colon, TokenType::As])
-            .is_some()
-        {
-            ty = match self.peek() {
-                t if is_datatype(t.kind) => DataType::from_token(self.next().kind),
-                t => panic!(
-                    "{}:{}: Syntax Error: Expected DataType, but got {:?}",
-                    t.line, t.col, t.kind
-                ),
-            };
-        }
-        ty
-    }
-    fn parse_decl(&mut self, is_explicit: bool) -> Node<'a> {
-        let info = Node::info(&self.peek());
-        let ident = expect!(self, TokenType::Ident);
-        let ty = self.parse_type();
-        if ty == DataType::Dynamic && is_explicit {
-            error!(info, "Syntax Error: Expected DataType definition");
-        }
-        if matches!(
-            self.peek().kind,
-            TokenType::Comma | TokenType::CloseParenthese | TokenType::CloseSquareBracket
-        ) {
-            Node::IdentExpr {
-                name: ident.pointer,
-                r: None,
-                ty: None,
-                info,
-            }
-        } else {
-            Node::Decl {
-                ident: ident.pointer,
-                ty: Some(ty),
-                kind: "Decl",
-                info,
-            }
-        }
-    }
-    fn parse_assign_core(&mut self) -> (Operator, Box<Node<'a>>) {
-        println!("var ");
-        println!("core: before expr");
-        let op = match expect!(self, is_assign_operator).kind {
-            TokenType::Assign => Operator::Assign,
-            TokenType::AssignNew => Operator::AssignNew,
-            TokenType::AssignPlus => Operator::AssignPlus,
-            TokenType::AssignMinus => Operator::AssignMinus,
-            TokenType::AssignMultiply => Operator::AssignMultiply,
-            TokenType::AssignPower => Operator::AssignPower,
-            TokenType::AssignAnd => Operator::AssignAnd,
-            TokenType::AssignOr => Operator::AssignOr,
-            TokenType::AssignDivide => Operator::AssignDivide,
-            TokenType::AssignModolus => Operator::AssignModolus,
-            TokenType::AssignBinaryAnd => Operator::AssignBinaryAnd,
-            TokenType::AssignBinaryOr => Operator::AssignBinaryOr,
-            TokenType::AssignBinaryXor => Operator::AssignBinaryXor,
-            _ => panic!("Assign operator unknown"),
-        };
-
-        let value = Box::new(self.parse_expr());
-        println!("V: {:?}", value);
-        (op, value)
-    }
-    fn parse_assign(&mut self, ident: &Token<'a>) -> Node<'a> {
-        println!("assign core ");
-        let info = Node::info(&self.peek());
-        let (op, value) = self.parse_assign_core();
-        Node::AssignStmt {
-            op,
-            ident: ident.pointer,
-            value,
-            info,
-            r: None,
-        }
-    }
-    fn parse_block(&mut self) -> Node<'a> {
-        let mut stmts: Vec<Box<Node<'a>>> = vec![];
-        let info = Node::info(self.peek());
-        while !matches!(self.peek().kind, TokenType::CloseBracket) {
-            println!("block: stmt");
-            let stmt = self.parse_statement();
-            if !matches!(stmt, Node::Empty) {
-                stmts.push(Box::new(stmt));
-            }
-        }
-        expect!(self, TokenType::CloseBracket);
-
-        self.expect_one_of(&[TokenType::SemiColon, TokenType::EOL]);
-        Node::Block {
-            is_body: false,
-            statements: stmts,
-            kind: "LocalScope",
-            info,
-            depth: None,
-        }
-    }
-    fn parse_call(&mut self, ident_t: &Token<'a>) -> Node<'a> {
-        let info = Node::info(&self.peek());
-        let ident = Box::new(Node::IdentExpr {
-            name: ident_t.pointer,
-            r: None,
-            ty: None,
-            info,
-        });
-        let mut params = vec![];
-        let mut args = vec![];
-        if self.peek().kind == TokenType::OpenSquareBracket {
-            expect!(self, TokenType::OpenSquareBracket);
-            params = self.parse_params(TokenType::CloseSquareBracket);
-        }
-        expect!(self, TokenType::OpenParenthese);
-        args = self.parse_params(TokenType::CloseParenthese);
-        Node::CallExpr {
-            ident,
-            params,
-            args,
-            kind: "CallExpr",
-            info,
-            r: None,
-        }
-    }
-    fn parse_statement(&mut self) -> Node<'a> {
-        match self.peek().kind {
-            TokenType::Let => self.parse_let(false),
-            TokenType::Const => self.parse_let(true),
-            TokenType::Return => self.parse_return(),
-            TokenType::Ident => {
-                let ident = self.next();
-                let peek = self.peek();
-                let info = Node::info(&ident);
-                match peek.kind {
-                    x if is_assign_operator(x) => self.parse_assign(&ident),
-                    x if is_operator(x) => {
-                        let left = Node::IdentExpr {
-                            name: ident.pointer,
-                            r: None,
-                            ty: None,
-                            info,
-                        };
-                        self.parse_expr_remain(left)
-                    }
-                    x if is_unary_operator(x) => {
-                        let mut _node = self.parse_primary();
-                        if let Node::UnaryExpr { node, .. } = &mut _node {
-                            *node = Box::new(Node::IdentExpr {
-                                name: ident.pointer,
-                                r: None,
-                                ty: None,
-                                info,
-                            })
-                        }
-                        _node
-                    }
-                    TokenType::OpenSquareBracket | TokenType::OpenParenthese => {
-                        self.parse_call(&ident)
-                    }
-                    TokenType::EOL | TokenType::EOF | TokenType::CloseBracket => Node::ReturnExpr {
-                        node: Box::new(Node::IdentExpr {
-                            name: ident.pointer,
-                            r: None,
-                            ty: None,
-                            info: info.clone(),
-                        }),
-                        info: info.clone(),
-                    },
-                    TokenType::SemiColon => Node::Empty,
-                    _ => {
-                        panic!("Not expected '{:?}' on line {}", peek.kind, peek.line)
-                    }
-                }
-            }
-            TokenType::OpenBracket => {
-                self.next(); // Consume '{'
-                self.parse_block()
-            }
-            TokenType::SemiColon => {
-                self.next();
-                Node::Empty
-            }
-
-            TokenType::EOL => {
-                self.next();
-                Node::Empty
-            }
-            _ => {
-                println!("stmt: before expr {:#?}", self.peek());
-                let expr = self.parse_expr();
-                if self.peek().kind == TokenType::CloseBracket {
-                    let info = Node::info(self.peek());
-                    Node::ReturnExpr {
-                        node: Box::new(expr),
-                        info,
-                    }
-                } else {
-                    self.expect_one_of(&[TokenType::SemiColon, TokenType::EOL]);
-                    expr
-                }
-            }
-        }
-    }
     pub fn parse(&mut self) -> Node<'a> {
         let mut stmts: Vec<Box<Node<'a>>> = vec![];
         while self.peek().kind != TokenType::EOF {
-            let stmt = self.parse_statement();
+            let (stmt, _, _) = self.parse_statement();
             if !matches!(stmt, Node::Empty) {
                 stmts.push(Box::new(stmt));
             }
@@ -647,9 +99,479 @@ impl<'a> Parser<'a> {
             kind: "ProgramNode",
         }
     }
-    fn eol(&mut self) {
-        if self.peek().kind == TokenType::SemiColon {
-            expect!(self, TokenType::SemiColon);
+    pub fn parse_statement(&mut self) -> (Node<'a>, TokenType, Option<NodeDetails>) {
+        let info = Node::info(self.peek());
+        let stmt = match self.peek().kind {
+            // ##### KEYWORDS
+            TokenType::Let => self.parse_let(),
+            TokenType::Const => self.parse_const(),
+            TokenType::Function => self.parse_func(),
+            TokenType::Return => self.parse_return(),
+            // ##### EXPRESSIONS
+            TokenType::Ident => self.parse_expr_ident(None),
+            TokenType::OpenBracket => self.parse_block(),
+            TokenType::OpenParenthese
+            | TokenType::OpenSquareBracket
+            | TokenType::IntLiteral
+            | TokenType::FloatLiteral
+            | TokenType::BoolLiteral => self.parse_expr(),
+            x if is_unary_operator(x) => self.parse_expr(),
+            TokenType::EOL => {
+                self.next();
+                Node::Empty
+            }
+            t => syntax_error!("Unexpected token '{:?}'", t),
+        };
+        let mut _info = None;
+        let needs_terminator = !matches!(
+            stmt,
+            Node::FunctionDecl { .. } | Node::Block { .. } | Node::Empty
+        );
+        let term = if !needs_terminator {
+            TokenType::EOL
+        } else if self.peek().kind == TokenType::CloseBracket {
+            _info = Some(Node::info(self.peek()));
+            TokenType::CloseBracket
+        } else {
+            println!("WHAT?: {:?}", self.peek().kind);
+            self.expect_one_of(&[TokenType::EOL, TokenType::SemiColon, TokenType::EOF])
+                .unwrap()
+                .kind
+        };
+        (stmt, term, Some(info))
+    }
+    fn parse_let(&mut self) -> Node<'a> {
+        let tok = expect!(self, TokenType::Let);
+        let info = Node::info(&tok);
+        let mut bound = self.parse_ident();
+        let mut ty = None;
+        if self.peek().kind == TokenType::Colon {
+            ty = Some(self.parse_definition());
+        }
+        bound.ty = ty;
+        let value;
+        if self.peek().kind == TokenType::Assign {
+            self.next();
+            value = self.parse_expr();
+        } else {
+            value = Node::Empty;
+        }
+        Node::LetDecl {
+            decl: bound,
+            value: Box::new(value),
+            kind: "LetDecl",
+            info,
+        }
+    }
+    fn parse_const(&mut self) -> Node<'a> {
+        let tok;
+        // TODO: Add condition to consume static here
+        //let mut is_static = false;
+        //if self.peek().kind == TokenType::Static {
+        //    tok = expect!(self, TokenType::Static);
+        //}
+        //
+        tok = expect!(self, TokenType::Const);
+        let info = Node::info(&tok);
+        let mut bound = self.parse_ident();
+        bound.ty = Some(self.parse_definition());
+        expect!(self, TokenType::Assign);
+        let value = self.parse_expr();
+        Node::ConstDecl {
+            decl: bound,
+            value: Box::new(value),
+            kind: "ConstDecl",
+            info,
+        }
+    }
+    fn parse_func(&mut self) -> Node<'a> {
+        let tok = expect!(self, TokenType::Function);
+        let info = Node::info(&tok);
+        let mut bound = self.parse_ident();
+        let mut return_ty = None;
+        let mut compile_params = vec![];
+        let mut runtime_params = vec![];
+        if self.peek().kind == TokenType::Colon {
+            return_ty = Some(self.parse_definition());
+        }
+        bound.ty = return_ty;
+        if self.peek().kind == TokenType::OpenSquareBracket {
+            self.next();
+            compile_params = self.parse_params(TokenType::CloseSquareBracket)
+        }
+        expect!(self, TokenType::OpenParenthese);
+        runtime_params = self.parse_params(TokenType::CloseParenthese);
+        println!("PEEK BLOCK: {:?}", self.peek().kind);
+        let mut block = self.parse_block();
+        if let Node::Block { is_body, .. } = &mut block {
+            *is_body = true
+        }
+        Node::FunctionDecl {
+            decl: bound,
+            kind: "FunctionDecl",
+            compile_params,
+            runtime_params,
+            block: Box::new(block),
+            info,
+        }
+    }
+    fn parse_params(&mut self, condition_token: TokenType) -> Vec<BoundVar<'a>> {
+        let mut params: Vec<BoundVar<'a>> = vec![];
+        while self.peek().kind != condition_token {
+            if self.peek().kind == TokenType::EOF {
+                syntax_error!("Unclosed parameter list");
+            }
+            let mut ident = self.parse_ident();
+            let ty = self.parse_definition();
+            ident.ty = Some(ty);
+            params.push(ident);
+            match self.peek().kind {
+                TokenType::Comma => {
+                    self.next();
+                }
+                x if x == condition_token => {}
+                _ => {
+                    let tok = self.next();
+                    let info = Node::info(&tok);
+                    syntax_error!(info, "Unexpected '{:?}'", tok.kind);
+                }
+            };
+        }
+        self.next();
+        return params;
+    }
+    fn parse_args(&mut self, condition_token: TokenType) -> Vec<Box<Node<'a>>> {
+        let mut args: Vec<Box<Node<'a>>> = vec![];
+        println!("LOOP: {:?} {:?}", self.peek().kind, condition_token);
+        while self.peek().kind != condition_token {
+            if self.peek().kind == TokenType::EOF {
+                syntax_error!("Unclosed argument list");
+            }
+            let arg = self.parse_expr();
+            args.push(Box::new(arg));
+            match self.peek().kind {
+                TokenType::Comma => {
+                    self.next();
+                }
+                x if x == condition_token => {}
+                _ => {
+                    let tok = self.next();
+                    let info = Node::info(&tok);
+                    // if x == TokenType::Colon {
+                    //     syntax_error!(info, "Unexpected 'Colon', this argument cannot be casted");
+                    // }
+                    syntax_error!(info, "Unexpected '{:?}'", tok.kind);
+                }
+            };
+        }
+        self.next();
+        args
+    }
+    fn parse_block(&mut self) -> Node<'a> {
+        self.next();
+        let mut stmts = vec![];
+        let info = Node::info(self.peek());
+        while self.peek().kind != TokenType::CloseBracket {
+            while self.peek().kind == TokenType::EOL {
+                self.next();
+            }
+            if self.peek().kind == TokenType::CloseBracket {
+                break;
+            }
+            let (stmt, end, _info) = self.parse_statement();
+            if stmt != Node::Empty {
+                if end != TokenType::SemiColon && self.peek().kind == TokenType::CloseBracket {
+                    println!("NODEEEE: {:?}", stmt);
+                    stmts.push(Box::new(Node::ReturnExpr {
+                        node: Box::new(stmt),
+                        info: _info.unwrap(),
+                    }));
+                } else {
+                    stmts.push(Box::new(stmt));
+                }
+            }
+        }
+        expect!(self, TokenType::CloseBracket);
+        Node::Block {
+            statements: stmts,
+            kind: "BlockScope",
+            info,
+            depth: None,
+            is_body: false,
+        }
+    }
+    fn parse_return(&mut self) -> Node<'a> {
+        let tok = self.next();
+        let info = Node::info(&tok);
+        if self.peek().kind == SemiColon {
+            syntax_error!(info, "Unexpected token, Return shall have a expression")
+        }
+        let expr = self.parse_expr();
+        Node::ReturnExpr {
+            node: Box::new(expr),
+            info,
+        }
+    }
+    fn parse_definition(&mut self) -> DataType {
+        expect!(self, TokenType::Colon);
+        if !is_datatype(self.peek().kind) {
+            let tok = self.next();
+            let info = Node::info(&tok);
+            syntax_error!(info, "Expected DataType not '{:?}'", tok.kind);
+        }
+        let ty = DataType::from_token(self.next().kind);
+        ty
+    }
+    fn parse_as(&mut self) -> DataType {
+        expect!(self, TokenType::As);
+        if !is_datatype(self.peek().kind) {
+            let tok = self.next();
+            let info = Node::info(&tok);
+            syntax_error!(info, "Expected DataType not '{:?}'", tok.kind);
+        }
+        let ty = DataType::from_token(self.next().kind);
+        ty
+    }
+    fn parse_ident(&mut self) -> BoundVar<'a> {
+        let tok = expect!(self, TokenType::Ident);
+        let info = Node::info(&tok);
+        BoundVar::new(tok.pointer, None, info)
+    }
+    fn parse_expr_ident(&mut self, mut ident_expr: Option<Node<'a>>) -> Node<'a> {
+        if ident_expr.is_none() {
+            let ident = self.parse_ident();
+            ident_expr = Some(Node::IdentExpr {
+                name: ident.ident,
+                r: None,
+                ty: None,
+                info: ident.info,
+            });
+        }
+        match self.peek().kind {
+            TokenType::OpenParenthese | TokenType::OpenSquareBracket => {
+                let token = self.next();
+                let info = Node::info(&token);
+                let mut compile_args = vec![];
+                if token.kind == TokenType::OpenSquareBracket {
+                    compile_args = self.parse_args(TokenType::CloseSquareBracket);
+                    expect!(self, TokenType::OpenParenthese);
+                }
+                let runtime_args = self.parse_args(TokenType::CloseParenthese);
+                Node::CallExpr {
+                    ident: Box::new(ident_expr.unwrap()),
+                    compile_args,
+                    runtime_args,
+                    kind: "CallExpr",
+                    r: None,
+                    info,
+                }
+            }
+            x if is_operator(x) => self.parse_expr_from(ident_expr),
+            TokenType::SemiColon => ident_expr.unwrap(),
+            x => {
+                let info = Node::info(self.peek());
+                syntax_error!(info, "Unexpected token '{:?}'", x)
+            }
+        }
+    }
+    fn parse_expr(&mut self) -> Node<'a> {
+        self.parse_expr_from(None)
+    }
+    fn parse_expr_from(&mut self, lhs: Option<Node<'a>>) -> Node<'a> {
+        let mut ops: Vec<(Token<'a>, bool)> = vec![];
+        let mut nodes: Vec<Node> = vec![];
+        let mut is_ident = false;
+        let mut after_op = false;
+        if let Some(lhs) = lhs {
+            nodes.push(lhs);
+        }
+        let combine = |nodes: &mut Vec<Node<'a>>, token: Token<'a>, unary: bool, after_op: bool| {
+            let info = Node::info(&token);
+            let mut op = Operator::from_token(token.kind);
+            if unary {
+                let node = Box::new(nodes.pop().unwrap());
+                if token.kind != TokenType::Not {
+                    op = match token.kind {
+                        TokenType::Increment => {
+                            if after_op {
+                                Some(Operator::PreIncrement)
+                            } else {
+                                Some(Operator::PostIncrement)
+                            }
+                        }
+                        TokenType::Decrement => {
+                            if after_op {
+                                Some(Operator::PreDecrement)
+                            } else {
+                                Some(Operator::PostDecrement)
+                            }
+                        }
+                        _ => syntax_error!("Unexpected token '{:?}'", token.kind),
+                    }
+                }
+                nodes.push(Node::UnaryExpr {
+                    op: op.unwrap(),
+                    node,
+                    kind: "UnaryExpr",
+                    ty: None,
+                    info,
+                });
+            } else {
+                let right = Box::new(nodes.pop().unwrap());
+                let left = Box::new(nodes.pop().unwrap());
+                let node;
+                if is_assign_operator(token.kind) {
+                    node = Node::AssignStmt {
+                        ident: left,
+                        op: op.unwrap(),
+                        value: right,
+                        info,
+                        r: None,
+                    }
+                } else {
+                    node = Node::BinaryExpr {
+                        op: op.unwrap(),
+                        left,
+                        right,
+                        kind: "BinaryExpr",
+                        ty: None,
+                        info,
+                    }
+                }
+                nodes.push(node);
+            }
+        };
+
+        loop {
+            println!("PEEK: {:?}", self.peek().kind);
+            match self.peek().kind {
+                TokenType::Ident
+                | TokenType::IntLiteral
+                | TokenType::FloatLiteral
+                | TokenType::BoolLiteral => {
+                    if nodes.last().is_some() && ops.last().is_none() {
+                        panic!("Expected operator, got '{:?}'", self.peek().kind);
+                    }
+                    if self.peek().kind == TokenType::Ident {
+                        is_ident = true;
+                    }
+                    nodes.push(self.parse_primary())
+                }
+                x if is_operator(x) => {
+                    let tok = self.next();
+                    if is_unary_operator(x) {
+                        if nodes.last().is_none() {
+                            after_op = true;
+                        }
+                        ops.push((tok, true));
+                    } else {
+                        after_op = false;
+                        is_ident = false;
+
+                        while let Some((top, unary)) = ops.last() {
+                            if !*unary || get_pred(top.kind) < get_pred(tok.kind) {
+                                break;
+                            }
+                            let (top, unary) = ops.pop().unwrap();
+                            combine(&mut nodes, top, unary, false);
+                        }
+
+                        ops.push((tok, false));
+                    }
+                }
+                TokenType::OpenBracket => {
+                    let inner = self.parse_block();
+                    nodes.push(inner);
+                }
+                TokenType::OpenParenthese => {
+                    if is_ident {
+                        is_ident = false;
+                        let ident = nodes.pop();
+                        nodes.push(self.parse_expr_ident(ident));
+                    } else {
+                        let inner = self.parse_expr();
+                        expect!(self, TokenType::CloseParenthese);
+                        nodes.push(inner);
+                    }
+                }
+                TokenType::EOL => {
+                    self.next();
+                }
+                _ => {
+                    println!("BREAKING ON: {:?}", self.peek().kind);
+                    break;
+                }
+            };
+            println!("NODES: {:#?}", nodes);
+            println!("OPS: {:#?}", ops);
+        }
+        while let Some((tok, unary)) = ops.pop() {
+            combine(&mut nodes, tok, unary, after_op);
+        }
+        let node = nodes.pop().unwrap();
+        println!("RETURNED: {:?}", node);
+        node
+    }
+    fn parse_primary(&mut self) -> Node<'a> {
+        match self.peek().kind {
+            TokenType::IntLiteral | TokenType::FloatLiteral | TokenType::BoolLiteral => {
+                self.parse_literal()
+            }
+            TokenType::Ident => {
+                let ident = self.parse_ident();
+                Node::IdentExpr {
+                    name: ident.ident,
+                    r: None,
+                    ty: None,
+                    info: ident.info,
+                }
+            }
+            /* TODO: Work on this when you support vectors
+            TokenType::OpenSquareBracket => {
+                self.next();
+                let args = self.parse_args(TokenType::CloseSquareBracket);
+
+            }
+            */
+            _ => syntax_error!("Unexpected token"),
+        }
+    }
+    fn parse_literal(&mut self) -> Node<'a> {
+        let token = self.next();
+        let info = Node::info(&token);
+        match token.kind {
+            TokenType::IntLiteral => {
+                let v = token.pointer.parse::<i64>().unwrap_or_else(|_| {
+                    let info = Node::info(&token);
+                    syntax_error!(info, "Invalid integer '{:?}'", token.pointer);
+                });
+                let mut ty = DataType::Signed32;
+                let mut size: usize = 4;
+                if self.peek().kind == TokenType::As {
+                    ty = self.parse_as();
+                    size = ty.get_size();
+                }
+                Node::IntLit { v, size, ty, info }
+            }
+
+            TokenType::FloatLiteral => {
+                let v = token.pointer.parse::<f64>().unwrap_or_else(|_| {
+                    let info = Node::info(&token);
+                    syntax_error!(info, "Invalid integer '{:?}'", token.pointer);
+                });
+                let mut ty = DataType::Signed32;
+                let mut size: usize = 4;
+                if self.peek().kind == TokenType::As {
+                    ty = self.parse_as();
+                    size = ty.get_size();
+                }
+                Node::FloatLit { v, size, ty, info }
+            }
+            TokenType::BoolLiteral => {
+                let v = token.pointer.parse::<bool>().unwrap();
+                Node::BooleanLit { v, info }
+            }
+            _ => syntax_error!("Unexpected token"),
         }
     }
     fn peek(&mut self) -> &Token<'a> {
@@ -658,6 +580,13 @@ impl<'a> Parser<'a> {
     fn next(&mut self) -> Token<'a> {
         let token = self.stream.next();
         token
+    }
+}
+
+fn is_operator(ty: TokenType) -> bool {
+    match ty {
+        x if is_assign_operator(x) || is_binary_operator(x) || is_unary_operator(x) => true,
+        _ => false,
     }
 }
 
@@ -679,7 +608,7 @@ fn is_assign_operator(ty: TokenType) -> bool {
         _ => false,
     }
 }
-fn is_operator(ty: TokenType) -> bool {
+fn is_binary_operator(ty: TokenType) -> bool {
     match ty {
         TokenType::Plus => true,
         TokenType::Minus => true,
@@ -699,6 +628,7 @@ fn is_operator(ty: TokenType) -> bool {
         TokenType::LesserThan => true,
         TokenType::GreaterThanOrEqual => true,
         TokenType::LesserThanOrEqual => true,
+        x if is_assign_operator(x) => true,
         _ => false,
     }
 }
@@ -707,16 +637,6 @@ fn is_unary_operator(ty: TokenType) -> bool {
         TokenType::Not => true,
         TokenType::Increment => true,
         TokenType::Decrement => true,
-        _ => false,
-    }
-}
-
-fn is_literal(ty: TokenType) -> bool {
-    match ty {
-        TokenType::IntLiteral => true,
-        TokenType::FloatLiteral => true,
-        TokenType::BoolLiteral => true,
-        TokenType::OpenSquareBracket => true,
         _ => false,
     }
 }
@@ -737,805 +657,16 @@ fn is_datatype(ty: TokenType) -> bool {
         _ => false,
     }
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::parser::node::NodeDetails;
 
-    mod declaration_tests {
-        use super::*;
-        const PRIMITIVE_TYPES: &[(&str, DataType)] = &[
-            ("u8", DataType::Unsigned8),
-            ("u16", DataType::Unsigned16),
-            ("u32", DataType::Unsigned32),
-            ("u64", DataType::Unsigned64),
-            ("i8", DataType::Signed8),
-            ("i16", DataType::Signed16),
-            ("i32", DataType::Signed32),
-            ("i64", DataType::Signed64),
-            ("f32", DataType::Float32),
-            ("f64", DataType::Float64),
-            ("bool", DataType::Boolean),
-        ];
-        #[test]
-        fn test_let() {
-            let line = "let x = 5;";
-            let mut parser = Parser::new(line);
-
-            let var_info = NodeDetails::new(1, 1);
-            let decl_info = NodeDetails::new(1, 5);
-            let integer_info = NodeDetails::new(1, 9);
-            assert_eq!(
-                Node::Program {
-                    statements: Vec::from([Box::new(Node::LetDecl {
-                        r: None,
-                        decl: Box::new(Node::Decl {
-                            ident: "x",
-                            ty: Some(DataType::Signed32),
-                            kind: "Decl",
-                            info: decl_info
-                        }),
-                        value: Box::new(Node::IntLit {
-                            v: 5,
-                            size: 4,
-                            info: integer_info
-                        }),
-                        kind: "LetDecl",
-                        info: var_info
-                    })]),
-                    kind: "ProgramNode"
-                },
-                parser.parse()
-            );
-        }
-        #[test]
-        fn test_let_with_type() {
-            for &(sym, ref ty) in PRIMITIVE_TYPES {
-                let line = format!("let x: {} = 5;", sym);
-                let mut parser = Parser::new(&line);
-
-                let var_info = NodeDetails::new(1, 1);
-                let decl_info = NodeDetails::new(1, 5);
-                let integer_info = NodeDetails::new(1, 9);
-                assert_eq!(
-                    Node::Program {
-                        statements: Vec::from([Box::new(Node::LetDecl {
-                            r: None,
-                            decl: Box::new(Node::Decl {
-                                ident: "x",
-                                ty: Some(ty.clone()),
-                                kind: "Decl",
-                                info: decl_info
-                            }),
-                            value: Box::new(match ty {
-                                DataType::Unsigned8
-                                | DataType::Unsigned16
-                                | DataType::Unsigned32
-                                | DataType::Unsigned64
-                                | DataType::Signed8
-                                | DataType::Signed16
-                                | DataType::Signed32
-                                | DataType::Signed64 => Node::IntLit {
-                                    v: 5,
-                                    size: 4,
-                                    info: integer_info
-                                },
-                                DataType::Float32 | DataType::Float64 => Node::FloatLit {
-                                    v: 5 as f64,
-                                    size: 4,
-                                    info: integer_info
-                                },
-                                _ => {
-                                    Node::Empty
-                                }
-                            }),
-                            kind: "LetDecl",
-                            info: var_info
-                        })]),
-                        kind: "ProgramNode"
-                    },
-                    parser.parse()
-                );
-            }
-        }
-        #[test]
-        fn test_let_as_type() {
-            for &(sym, ref ty) in PRIMITIVE_TYPES {
-                let line = format!("let x = 5 as {};", sym);
-                let mut parser = Parser::new(&line);
-
-                let var_info = NodeDetails::new(1, 1);
-                let decl_info = NodeDetails::new(1, 5);
-                let integer_info = NodeDetails::new(1, 9);
-                assert_eq!(
-                    Node::Program {
-                        statements: Vec::from([Box::new(Node::LetDecl {
-                            r: None,
-                            decl: Box::new(Node::Decl {
-                                ident: "x",
-                                ty: Some(ty.clone()),
-                                kind: "Decl",
-                                info: decl_info
-                            }),
-                            value: Box::new(match ty {
-                                DataType::Unsigned8
-                                | DataType::Unsigned16
-                                | DataType::Unsigned32
-                                | DataType::Unsigned64
-                                | DataType::Signed8
-                                | DataType::Signed16
-                                | DataType::Signed32
-                                | DataType::Signed64 => Node::IntLit {
-                                    v: 5,
-                                    size: ty.get_size(),
-                                    info: integer_info
-                                },
-                                DataType::Float32 | DataType::Float64 => Node::FloatLit {
-                                    v: 5 as f64,
-                                    size: ty.get_size(),
-                                    info: integer_info
-                                },
-                                _ => {
-                                    Node::Empty
-                                }
-                            }),
-                            kind: "LetDecl",
-                            info: var_info
-                        })]),
-                        kind: "ProgramNode"
-                    },
-                    parser.parse()
-                );
-            }
-        }
-
-        #[test]
-        fn test_let_block() {
-            let line = "let x = {5};";
-            let mut parser = Parser::new(line);
-            let decl_info = NodeDetails::new(1, 5);
-            let var_info = NodeDetails::new(1, 1);
-            let block_info = NodeDetails::new(1, 10);
-            let integer_info = NodeDetails::new(1, 10);
-            let return_info = NodeDetails::new(1, 11);
-            assert_eq!(
-                Node::Program {
-                    statements: Vec::from([Box::new(Node::LetDecl {
-                        r: None,
-                        decl: Box::new(Node::Decl {
-                            ident: "x",
-                            ty: Some(DataType::Dynamic),
-                            kind: "Decl",
-                            info: decl_info
-                        }),
-                        value: Box::new(Node::Block {
-                            is_body: false,
-                            depth: None,
-                            statements: Vec::from([Box::new(Node::ReturnExpr {
-                                node: Box::new(Node::IntLit {
-                                    v: 5,
-                                    size: 4,
-                                    info: integer_info
-                                }),
-                                info: return_info
-                            })]),
-                            kind: "LocalScope",
-                            info: block_info
-                        }),
-                        kind: "LetDecl",
-                        info: var_info
-                    })]),
-                    kind: "ProgramNode"
-                },
-                parser.parse()
-            );
-        }
-        #[test]
-
-        fn test_let_block_with_return() {
-            let line = "let x = {return 5;};";
-            let mut parser = Parser::new(line);
-            let decl_info = NodeDetails::new(1, 5);
-            let var_info = NodeDetails::new(1, 1);
-            let block_info = NodeDetails::new(1, 10);
-            let integer_info = NodeDetails::new(1, 17);
-            let return_info = NodeDetails::new(1, 10);
-            assert_eq!(
-                Node::Program {
-                    statements: Vec::from([Box::new(Node::LetDecl {
-                        r: None,
-                        decl: Box::new(Node::Decl {
-                            ident: "x",
-                            ty: Some(DataType::Dynamic),
-                            kind: "Decl",
-                            info: decl_info
-                        }),
-                        value: Box::new(Node::Block {
-                            is_body: false,
-                            depth: None,
-                            statements: Vec::from([Box::new(Node::ReturnExpr {
-                                node: Box::new(Node::IntLit {
-                                    v: 5,
-                                    size: 4,
-                                    info: integer_info
-                                }),
-                                info: return_info
-                            })]),
-                            kind: "LocalScope",
-                            info: block_info
-                        }),
-                        kind: "LetDecl",
-                        info: var_info
-                    })]),
-                    kind: "ProgramNode"
-                },
-                parser.parse()
-            );
-        }
-    }
-    mod operations {
-        use std::fmt::format;
-
-        use super::*;
-        const BINARY_OPS: &[(&str, Operator)] = &[
-            ("+", Operator::Add),
-            ("-", Operator::Sub),
-            ("*", Operator::Mul),
-            ("**", Operator::Power),
-            ("/", Operator::Div),
-            ("&&", Operator::And),
-            ("||", Operator::Or),
-            ("&", Operator::BinaryAnd),
-            ("^", Operator::BinaryXor),
-            ("%", Operator::Mod),
-            ("==", Operator::Equality),
-            ("!=", Operator::NotEquality),
-            ("<", Operator::LesserThan),
-            ("<=", Operator::LesserThanOrEqual),
-            (">", Operator::GreaterThan),
-            (">=", Operator::GreaterThanOrEqual),
-        ];
-        const UNARY_OPS: &[(&str, Operator)] = &[
-            ("!", Operator::Not),
-            ("++", Operator::PreIncrement),
-            ("++", Operator::PostIncrement),
-            ("--", Operator::PreDecrement),
-            ("--", Operator::PostDecrement),
-        ];
-        const ASSIGN_OPS: &[(&str, Operator)] = &[
-            ("<-", Operator::AssignNew),
-            ("+=", Operator::AssignPlus),
-            ("-=", Operator::AssignMinus),
-            ("*=", Operator::AssignMultiply),
-            ("**=", Operator::AssignPower),
-            ("/=", Operator::AssignDivide),
-            ("%=", Operator::AssignModolus),
-            ("&&=", Operator::AssignAnd),
-            ("||=", Operator::AssignOr),
-            ("&=", Operator::AssignBinaryAnd),
-            ("|=", Operator::AssignBinaryOr),
-            ("^=", Operator::AssignBinaryXor),
-        ];
-        #[test]
-        fn test_binary_expressions_without_ident() {
-            for &(sym, ref op) in BINARY_OPS {
-                println!("TEST ({})", sym);
-                let line = format!("5 {} 4", sym);
-                let mut parser = Parser::new(&line);
-
-                let info = NodeDetails::new(0, 0);
-                assert_eq!(
-                    Node::Program {
-                        statements: Vec::from([Box::new(Node::BinaryExpr {
-                            op: op.clone(),
-                            left: Box::new(Node::IntLit {
-                                v: 5,
-                                size: 4,
-                                info
-                            }),
-                            right: Box::new(Node::IntLit {
-                                v: 4,
-                                size: 4,
-                                info
-                            }),
-                            ty: None,
-                            kind: "",
-                            info
-                        })]),
-                        kind: ""
-                    },
-                    parser.parse()
-                );
-            }
-        }
-        #[test]
-        fn test_binary_expressions() {
-            for &(sym, ref op) in BINARY_OPS {
-                let line = format!(
-                    "let a = 4;
-let b = 10;
-a {} b;",
-                    sym
-                );
-                let mut parser = Parser::new(&line);
-
-                let info = NodeDetails::new(0, 0);
-                assert_eq!(
-                    Node::Program {
-                        statements: Vec::from([
-                            Box::new(Node::LetDecl {
-                                r: None,
-                                decl: Box::new(Node::Decl {
-                                    ident: "a",
-                                    ty: Some(DataType::Signed32),
-                                    kind: "",
-                                    info
-                                }),
-                                value: Box::new(Node::IntLit {
-                                    v: 4,
-                                    size: 4,
-                                    info
-                                }),
-                                kind: "",
-                                info
-                            }),
-                            Box::new(Node::LetDecl {
-                                r: None,
-                                decl: Box::new(Node::Decl {
-                                    ident: "b",
-                                    ty: Some(DataType::Signed32),
-                                    kind: "",
-                                    info
-                                }),
-                                value: Box::new(Node::IntLit {
-                                    v: 10,
-                                    size: 4,
-                                    info
-                                }),
-                                kind: "",
-                                info
-                            }),
-                            Box::new(Node::BinaryExpr {
-                                op: op.clone(),
-                                left: Box::new(Node::IdentExpr {
-                                    name: "a",
-                                    r: None,
-                                    ty: None,
-                                    info
-                                }),
-                                right: Box::new(Node::IdentExpr {
-                                    name: "b",
-                                    r: None,
-                                    ty: None,
-                                    info
-                                }),
-                                ty: None,
-                                kind: "",
-                                info
-                            })
-                        ]),
-                        kind: ""
-                    },
-                    parser.parse()
-                );
-            }
-        }
-        #[test]
-        fn test_unary_expresssions() {
-            for &(sym, ref op) in UNARY_OPS {
-                let pre = {
-                    if op == &Operator::PostIncrement || op == &Operator::PostDecrement {
-                        false
-                    } else {
-                        true
-                    }
-                };
-                let line = format!(
-                    "let a = 4;
-{}",
-                    if pre {
-                        format!("{}a", sym)
-                    } else {
-                        format!("a{}", sym)
-                    }
-                );
-                let mut parser = Parser::new(&line);
-
-                let info = NodeDetails::new(0, 0);
-                assert_eq!(
-                    Node::Program {
-                        statements: Vec::from([
-                            Box::new(Node::LetDecl {
-                                r: None,
-                                decl: Box::new(Node::Decl {
-                                    ident: "a",
-                                    ty: Some(DataType::Signed32),
-                                    kind: "",
-                                    info
-                                }),
-                                value: Box::new(Node::IntLit {
-                                    v: 4,
-                                    size: 4,
-                                    info
-                                }),
-                                kind: "",
-                                info
-                            }),
-                            Box::new(Node::UnaryExpr {
-                                op: op.clone(),
-                                node: Box::new(Node::IdentExpr {
-                                    name: "a",
-                                    r: None,
-                                    ty: None,
-                                    info
-                                }),
-                                ty: None,
-                                kind: "",
-                                info
-                            })
-                        ]),
-                        kind: ""
-                    },
-                    parser.parse()
-                );
-            }
-        }
-        #[test]
-        fn test_assign_expressions() {
-            for &(sym, ref op) in ASSIGN_OPS {
-                let line = format!(
-                    "let a = 4;
-a {} 4;",
-                    sym
-                );
-                let mut parser = Parser::new(&line);
-
-                let info = NodeDetails::new(0, 0);
-                assert_eq!(
-                    Node::Program {
-                        statements: Vec::from([
-                            Box::new(Node::LetDecl {
-                                r: None,
-                                decl: Box::new(Node::Decl {
-                                    ident: "a",
-                                    ty: Some(DataType::Signed32),
-                                    kind: "",
-                                    info
-                                }),
-                                value: Box::new(Node::IntLit {
-                                    v: 4,
-                                    size: 4,
-                                    info
-                                }),
-                                kind: "",
-                                info
-                            }),
-                            Box::new(Node::AssignStmt {
-                                ident: "a",
-                                op: op.clone(),
-                                value: Box::new(Node::IntLit {
-                                    v: 4,
-                                    size: 4,
-                                    info
-                                }),
-                                info,
-                                r: None
-                            })
-                        ]),
-                        kind: ""
-                    },
-                    parser.parse()
-                );
-            }
-        }
-    }
-    mod functions {
-        use super::*;
-
-        #[test]
-        fn test_function() {
-            let line = "fn name[](){let x = {return 5;};}";
-            let mut parser = Parser::new(line);
-            let decl_info = NodeDetails::new(1, 17);
-            let var_info = NodeDetails::new(1, 13);
-            let block_info = NodeDetails::new(1, 22);
-            let integer_info = NodeDetails::new(1, 29);
-            let return_info = NodeDetails::new(1, 22);
-            let info = NodeDetails::new(0, 0);
-            assert_eq!(
-                Node::Program {
-                    statements: Vec::from([Box::new(Node::FunctionDecl {
-                        decl: Box::new(Node::Decl {
-                            ident: "name",
-                            ty: Some(DataType::Dynamic),
-                            kind: "",
-                            info
-                        }),
-                        params: vec![],
-                        args: vec![],
-                        block: Box::new(Node::Block {
-                            statements: vec![Box::new(Node::LetDecl {
-                                r: None,
-                                decl: Box::new(Node::Decl {
-                                    ident: "x",
-                                    ty: Some(DataType::Dynamic),
-                                    kind: "Decl",
-                                    info: decl_info
-                                }),
-                                value: Box::new(Node::Block {
-                                    is_body: false,
-                                    depth: None,
-                                    statements: Vec::from([Box::new(Node::ReturnExpr {
-                                        node: Box::new(Node::IntLit {
-                                            v: 5,
-                                            size: 8,
-                                            info: integer_info
-                                        }),
-                                        info: return_info
-                                    })]),
-                                    kind: "LocalScope",
-                                    info: block_info
-                                }),
-                                kind: "LetDecl",
-                                info: var_info
-                            })],
-                            kind: "",
-                            info,
-                            depth: Some(1),
-                            is_body: true
-                        }),
-                        kind: "",
-                        info
-                    }),]),
-                    kind: "ProgramNode"
-                },
-                parser.parse()
-            );
-        }
-        #[test]
-        fn test_function2() {
-            let line = "fn name(){let x = {return 5;};}";
-            let mut parser = Parser::new(line);
-            let info = NodeDetails::new(0, 0);
-            assert_eq!(
-                Node::Program {
-                    statements: Vec::from([Box::new(Node::FunctionDecl {
-                        decl: Box::new(Node::Decl {
-                            ident: "name",
-                            ty: Some(DataType::Dynamic),
-                            kind: "",
-                            info
-                        }),
-                        params: vec![],
-                        args: vec![],
-                        block: Box::new(Node::Block {
-                            statements: vec![Box::new(Node::LetDecl {
-                                r: None,
-                                decl: Box::new(Node::Decl {
-                                    ident: "x",
-                                    ty: Some(DataType::Dynamic),
-                                    kind: "Decl",
-                                    info
-                                }),
-                                value: Box::new(Node::Block {
-                                    is_body: false,
-                                    depth: None,
-                                    statements: Vec::from([Box::new(Node::ReturnExpr {
-                                        node: Box::new(Node::IntLit {
-                                            v: 5,
-                                            size: 8,
-                                            info
-                                        }),
-                                        info
-                                    })]),
-                                    kind: "LocalScope",
-                                    info
-                                }),
-                                kind: "LetDecl",
-                                info
-                            })],
-                            kind: "",
-                            info,
-                            depth: Some(1),
-                            is_body: true
-                        }),
-                        kind: "",
-                        info
-                    }),]),
-                    kind: "ProgramNode"
-                },
-                parser.parse()
-            );
-        }
-        #[test]
-        #[should_panic]
-        fn test_function3() {
-            let line = "fn name{let x = {return 5;};}";
-            let mut parser = Parser::new(line);
-            let info = NodeDetails::new(0, 0);
-            assert_eq!(
-                Node::Program {
-                    statements: Vec::from([Box::new(Node::FunctionDecl {
-                        decl: Box::new(Node::Decl {
-                            ident: "name",
-                            ty: Some(DataType::Dynamic),
-                            kind: "",
-                            info
-                        }),
-                        params: vec![],
-                        args: vec![],
-                        block: Box::new(Node::Block {
-                            statements: vec![Box::new(Node::LetDecl {
-                                r: None,
-                                decl: Box::new(Node::Decl {
-                                    ident: "x",
-                                    ty: Some(DataType::Dynamic),
-                                    kind: "Decl",
-                                    info
-                                }),
-                                value: Box::new(Node::Block {
-                                    is_body: false,
-                                    depth: None,
-                                    statements: Vec::from([Box::new(Node::ReturnExpr {
-                                        node: Box::new(Node::IntLit {
-                                            v: 5,
-                                            size: 8,
-                                            info
-                                        }),
-                                        info
-                                    })]),
-                                    kind: "LocalScope",
-                                    info
-                                }),
-                                kind: "LetDecl",
-                                info
-                            })],
-                            kind: "",
-                            info,
-                            depth: Some(1),
-                            is_body: true
-                        }),
-                        kind: "",
-                        info
-                    }),]),
-                    kind: "ProgramNode"
-                },
-                parser.parse()
-            );
-        }
-
-        #[test]
-        fn test_function_call() {
-            let line = "name()";
-            let mut parser = Parser::new(line);
-            let info = NodeDetails::new(0, 0);
-            assert_eq!(
-                Node::Program {
-                    statements: Vec::from([Box::new(Node::CallExpr {
-                        ident: Box::new(Node::IdentExpr {
-                            name: "name",
-                            r: None,
-                            ty: None,
-                            info
-                        }),
-                        params: vec![],
-                        args: vec![],
-                        kind: "",
-                        info,
-                        r: None,
-                    }),]),
-                    kind: "ProgramNode"
-                },
-                parser.parse()
-            );
-        }
-        #[test]
-        fn test_function_call2() {
-            let line = "name[]()";
-            let mut parser = Parser::new(line);
-            let info = NodeDetails::new(0, 0);
-            assert_eq!(
-                Node::Program {
-                    statements: Vec::from([Box::new(Node::CallExpr {
-                        ident: Box::new(Node::IdentExpr {
-                            name: "name",
-                            r: None,
-                            ty: None,
-                            info
-                        }),
-                        params: vec![],
-                        args: vec![],
-                        kind: "",
-                        info,
-                        r: None,
-                    }),]),
-                    kind: "ProgramNode"
-                },
-                parser.parse()
-            );
-        }
-        #[test]
-        #[should_panic]
-        fn test_function_call3() {
-            let line = "name[)";
-            let mut parser = Parser::new(line);
-            let info = NodeDetails::new(0, 0);
-            assert_eq!(
-                Node::Program {
-                    statements: Vec::from([Box::new(Node::CallExpr {
-                        ident: Box::new(Node::IdentExpr {
-                            name: "name",
-                            r: None,
-                            ty: None,
-                            info
-                        }),
-                        params: vec![],
-                        args: vec![],
-                        kind: "",
-                        info,
-                        r: None,
-                    }),]),
-                    kind: "ProgramNode"
-                },
-                parser.parse()
-            );
-        }
-        #[test]
-        fn test_function_call4() {
-            let line = "name[1, 2, 3](1, 2, 3)";
-            let mut parser = Parser::new(line);
-            let info = NodeDetails::new(0, 0);
-            assert_eq!(
-                Node::Program {
-                    statements: Vec::from([Box::new(Node::CallExpr {
-                        ident: Box::new(Node::IdentExpr {
-                            name: "name",
-                            r: None,
-                            ty: None,
-                            info
-                        }),
-                        params: vec![
-                            Box::new(Node::IntLit {
-                                v: 1,
-                                size: 4,
-                                info
-                            }),
-                            Box::new(Node::IntLit {
-                                v: 2,
-                                size: 4,
-                                info
-                            }),
-                            Box::new(Node::IntLit {
-                                v: 3,
-                                size: 4,
-                                info
-                            }),
-                        ],
-                        args: vec![
-                            Box::new(Node::IntLit {
-                                v: 1,
-                                size: 4,
-                                info
-                            }),
-                            Box::new(Node::IntLit {
-                                v: 2,
-                                size: 4,
-                                info
-                            }),
-                            Box::new(Node::IntLit {
-                                v: 3,
-                                size: 4,
-                                info
-                            }),
-                        ],
-                        kind: "",
-                        info,
-                        r: None,
-                    }),]),
-                    kind: "ProgramNode"
-                },
-                parser.parse()
-            );
-        }
-    }
+macro_rules! syntax_error {
+    ($d:ident, $($arg:tt)*) => {{
+        panic!("{} <- Syntax Error: {}", $d.log(), format_args!($($arg)*));
+    }};
+    ($($arg:tt)*) => {{
+        panic!("Syntax Error: {}", format_args!($($arg)*));
+    }};
 }
+pub(crate) use syntax_error;
+
+#[cfg(test)]
+pub mod tests;

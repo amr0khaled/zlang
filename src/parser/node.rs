@@ -8,11 +8,12 @@ use crate::{
 pub struct NodeDetails {
     line: usize,
     col: usize,
+    kind: TokenType,
 }
 
 impl NodeDetails {
-    pub fn new(line: usize, col: usize) -> Self {
-        Self { line, col }
+    pub fn new(line: usize, col: usize, kind: TokenType) -> Self {
+        Self { line, col, kind }
     }
     pub fn log(&self) -> String {
         format!("Line {}:{}", self.line, self.col)
@@ -37,6 +38,26 @@ pub enum DataType {
 }
 
 impl DataType {
+    pub fn from_symbol(sym: Option<SymbolType>) -> Option<Self> {
+        if sym.is_none() {
+            return None;
+        }
+        match sym.unwrap() {
+            SymbolType::Unsigned8 => Some(Self::Unsigned8),
+            SymbolType::Signed8 => Some(Self::Signed8),
+            SymbolType::Unsigned16 => Some(Self::Unsigned16),
+            SymbolType::Signed16 => Some(Self::Signed16),
+            SymbolType::Unsigned32 => Some(Self::Unsigned32),
+            SymbolType::Signed32 => Some(Self::Signed32),
+            SymbolType::Unsigned64 => Some(Self::Unsigned64),
+            SymbolType::Signed64 => Some(Self::Signed64),
+            SymbolType::Float32 => Some(Self::Float32),
+            SymbolType::Float64 => Some(Self::Float64),
+            SymbolType::Boolean => Some(Self::Boolean),
+            SymbolType::Uninitialized => Some(Self::Dynamic),
+            _ => None,
+        }
+    }
     pub fn from_token(token: TokenType) -> Self {
         match token {
             TokenType::U8 => Self::Unsigned8,
@@ -53,22 +74,22 @@ impl DataType {
             _ => panic!("Syntax error: Expected datatype, got {:?}", token),
         }
     }
-    pub fn from_symbol(ty: SymbolType) -> Self {
-        match ty {
-            SymbolType::Unsigned8 => Self::Unsigned8,
-            SymbolType::Unsigned16 => Self::Unsigned16,
-            SymbolType::Unsigned32 => Self::Unsigned32,
-            SymbolType::Unsigned64 => Self::Unsigned64,
-            SymbolType::Signed8 => Self::Signed8,
-            SymbolType::Signed16 => Self::Signed16,
-            SymbolType::Signed32 => Self::Signed32,
-            SymbolType::Signed64 => Self::Signed64,
-            SymbolType::Float32 => Self::Float32,
-            SymbolType::Float64 => Self::Float64,
-            SymbolType::Boolean => Self::Boolean,
-            _ => panic!("Syntax error: Expected datatype, got {:?}", ty),
-        }
-    }
+    //pub fn from_symbol(ty: SymbolType) -> Self {
+    //    match ty {
+    //        SymbolType::Unsigned8 => Self::Unsigned8,
+    //        SymbolType::Unsigned16 => Self::Unsigned16,
+    //        SymbolType::Unsigned32 => Self::Unsigned32,
+    //        SymbolType::Unsigned64 => Self::Unsigned64,
+    //        SymbolType::Signed8 => Self::Signed8,
+    //        SymbolType::Signed16 => Self::Signed16,
+    //        SymbolType::Signed32 => Self::Signed32,
+    //        SymbolType::Signed64 => Self::Signed64,
+    //        SymbolType::Float32 => Self::Float32,
+    //        SymbolType::Float64 => Self::Float64,
+    //        SymbolType::Boolean => Self::Boolean,
+    //        _ => panic!("Syntax error: Expected datatype, got {:?}", ty),
+    //    }
+    //}
     pub fn get_size(&self) -> usize {
         match self {
             DataType::Unsigned8 | DataType::Signed8 => 1,
@@ -102,21 +123,47 @@ impl DataType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BoundVar<'a> {
+    pub ident: &'a str,
+    pub ty: Option<DataType>,
+    pub info: NodeDetails,
+}
+
+impl<'a> BoundVar<'a> {
+    pub fn new(ident: &'a str, ty: Option<DataType>, info: NodeDetails) -> Self {
+        Self { ident, ty, info }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SymbolRef {
+    pub id: u32,
+    pub depth: usize,
+}
+
+impl SymbolRef {
+    pub fn new(id: u32, depth: usize) -> Self {
+        Self { id, depth }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum Node<'a> {
     // ===References===
-    Ref(u32, usize),
     DataType(DataType),
     // ===Literal===
     IntLit {
         v: i64,
         size: usize,
+        ty: DataType,
         info: NodeDetails,
     },
     FloatLit {
         v: f64,
         size: usize,
+        ty: DataType,
         info: NodeDetails,
     },
     BooleanLit {
@@ -127,7 +174,7 @@ pub enum Node<'a> {
     // ===Expressions===
     IdentExpr {
         name: &'a str,
-        r: Option<Box<Node<'a>>>,
+        r: Option<SymbolRef>,
         ty: Option<DataType>,
         info: NodeDetails,
     },
@@ -148,50 +195,38 @@ pub enum Node<'a> {
     }, // x + y | 5 < 2
     CallExpr {
         ident: Box<Node<'a>>,
-        params: Vec<Box<Node<'a>>>,
-        args: Vec<Box<Node<'a>>>,
+        compile_args: Vec<Box<Node<'a>>>,
+        runtime_args: Vec<Box<Node<'a>>>,
         kind: &'a str,
         info: NodeDetails,
-        r: Option<Box<Node<'a>>>,
+        r: Option<SymbolRef>,
     },
     // ===Statements===
     FunctionDecl {
-        decl: Box<Node<'a>>,
-        params: Vec<Box<Node<'a>>>,
-        args: Vec<Box<Node<'a>>>,
+        decl: BoundVar<'a>,
+        compile_params: Vec<BoundVar<'a>>,
+        runtime_params: Vec<BoundVar<'a>>,
         block: Box<Node<'a>>,
         kind: &'a str,
         info: NodeDetails,
     },
-    Decl {
-        ident: &'a str,
-        ty: Option<DataType>,
-        kind: &'a str,
-        info: NodeDetails,
-    },
     LetDecl {
-        decl: Box<Node<'a>>,
+        decl: BoundVar<'a>,
         value: Box<Node<'a>>,
         kind: &'a str,
         info: NodeDetails,
-        r: Option<Box<Node<'a>>>,
     },
     AssignStmt {
-        ident: &'a str,
+        ident: Box<Node<'a>>,
         op: Operator,
         value: Box<Node<'a>>,
         info: NodeDetails,
-        r: Option<Box<Node<'a>>>,
+        r: Option<SymbolRef>,
     },
     ConstDecl {
-        decl: Box<Node<'a>>,
+        decl: BoundVar<'a>,
         value: Box<Node<'a>>,
         kind: &'a str,
-        info: NodeDetails,
-        r: Option<Box<Node<'a>>>,
-    },
-    ExprStmt {
-        node: Box<Node<'a>>,
         info: NodeDetails,
     },
     ReturnExpr {
@@ -215,7 +250,6 @@ pub enum Node<'a> {
 impl<'a> PartialEq for Node<'a> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Ref(l0, l1), Self::Ref(r0, r1)) => l0 == r0 && l1 == r1,
             (Self::DataType(l0), Self::DataType(r0)) => l0 == r0,
             (
                 Self::IntLit {
@@ -293,16 +327,16 @@ impl<'a> PartialEq for Node<'a> {
             (
                 Self::CallExpr {
                     ident: l_ident,
-                    params: l_params,
-                    args: l_args,
+                    compile_args: l_params,
+                    runtime_args: l_args,
 
                     r: l_r,
                     ..
                 },
                 Self::CallExpr {
                     ident: r_ident,
-                    params: r_params,
-                    args: r_args,
+                    compile_args: r_params,
+                    runtime_args: r_args,
 
                     r: r_r,
                     ..
@@ -311,45 +345,29 @@ impl<'a> PartialEq for Node<'a> {
             (
                 Self::FunctionDecl {
                     decl: l_decl,
-                    params: l_params,
-                    args: l_args,
+                    compile_params: l_params,
+                    runtime_params: l_args,
                     ..
                 },
                 Self::FunctionDecl {
                     decl: r_decl,
-                    params: r_params,
-                    args: r_args,
+                    compile_params: r_params,
+                    runtime_params: r_args,
                     ..
                 },
             ) => l_decl == r_decl && l_params == r_params && l_args == r_args,
             (
-                Self::Decl {
-                    ident: l_ident,
-                    ty: l_ty,
-                    ..
-                },
-                Self::Decl {
-                    ident: r_ident,
-                    ty: r_ty,
-                    ..
-                },
-            ) => l_ident == r_ident && l_ty == r_ty,
-            (
                 Self::LetDecl {
                     decl: l_decl,
                     value: l_value,
-
-                    r: l_r,
                     ..
                 },
                 Self::LetDecl {
                     decl: r_decl,
                     value: r_value,
-
-                    r: r_r,
                     ..
                 },
-            ) => l_decl == r_decl && l_value == r_value && l_r == r_r,
+            ) => l_decl.ident == r_decl.ident && l_decl.ty == r_decl.ty && l_value == r_value,
             (
                 Self::AssignStmt {
                     ident: l_ident,
@@ -370,21 +388,14 @@ impl<'a> PartialEq for Node<'a> {
                 Self::ConstDecl {
                     decl: l_decl,
                     value: l_value,
-
-                    r: l_r,
                     ..
                 },
                 Self::ConstDecl {
                     decl: r_decl,
                     value: r_value,
-
-                    r: r_r,
                     ..
                 },
-            ) => l_decl == r_decl && l_value == r_value && l_r == r_r,
-            (Self::ExprStmt { node: l_node, .. }, Self::ExprStmt { node: r_node, .. }) => {
-                l_node == r_node
-            }
+            ) => l_decl.ident == r_decl.ident && l_decl.ty == r_decl.ty && l_value == r_value,
             (Self::ReturnExpr { node: l_node, .. }, Self::ReturnExpr { node: r_node, .. }) => {
                 l_node == r_node
             }
@@ -424,6 +435,7 @@ impl<'a> Node<'a> {
         NodeDetails {
             line: token.line,
             col: token.col,
+            kind: token.kind,
         }
     }
     pub fn inf(&self) -> Option<NodeDetails> {
@@ -438,7 +450,6 @@ impl<'a> Node<'a> {
             Node::LetDecl { info, .. } => Some(*info),
             Node::AssignStmt { info, .. } => Some(*info),
             Node::ConstDecl { info, .. } => Some(*info),
-            Node::ExprStmt { info, .. } => Some(*info),
             Node::ReturnExpr { info, .. } => Some(*info),
             Node::Block { info, .. } => Some(*info),
             _ => None,

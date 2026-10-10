@@ -2,7 +2,7 @@ use crate::{lexer::types::TokenType, util::Iter};
 
 pub mod types;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Eq)]
 pub struct Token<'a> {
     pub kind: TokenType,
     pub pointer: &'a str,
@@ -10,13 +10,18 @@ pub struct Token<'a> {
     pub col: usize,
 }
 impl<'a> Token<'a> {
-    pub fn new(token_type: TokenType, v: &'a str, line: usize, col: usize) -> Self {
+    pub fn new(kind: TokenType, pointer: &'a str, line: usize, col: usize) -> Self {
         Self {
-            kind: token_type,
-            pointer: v,
+            kind,
+            pointer,
             line,
             col,
         }
+    }
+}
+impl<'a> PartialEq for Token<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.pointer == other.pointer
     }
 }
 
@@ -378,6 +383,55 @@ mod tests {
         );
         assert_eq!(
             Token::new(TokenType::EOF, "", 1, 12),
+            tokenizer.next_token()
+        );
+    }
+    #[test]
+    fn test_prefix_postfix() {
+        let line = "let x = 5; x++; ++x";
+        let mut tokenizer = Tokenizer::new(line);
+        assert_eq!(
+            Token::new(TokenType::Let, "let", 1, 1),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::Ident, "x", 1, 5),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::Assign, "=", 1, 7),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::IntLiteral, "5", 1, 9),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::SemiColon, ";", 1, 12),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::Ident, "x", 1, 12),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::Increment, "++", 1, 12),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::SemiColon, ";", 1, 12),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::Increment, "++", 1, 12),
+            tokenizer.next_token()
+        );
+        assert_eq!(
+            Token::new(TokenType::Ident, "x", 1, 12),
+            tokenizer.next_token()
+        );
+        assert_ne!(
+            Token::new(TokenType::SemiColon, ";", 1, 12),
             tokenizer.next_token()
         );
     }
